@@ -14,6 +14,7 @@ export interface ConnectionConfig {
   shopDomain?: string;
   shoptetEshopId?: number;
   shoptetAccess?: "private" | "addon";
+  shoptetWriteAcknowledged?: boolean;
   stockPath?: string;
   csvImport?: CsvImportProfile;
   permission?: "read" | "read_write";
@@ -82,13 +83,15 @@ export function createAdapters(
       if (!c.stockPath) throw new Error("File path missing");
       a = new FileInventoryAdapter(c.id, c.stockPath, c.csvImport);
     } else if (c.platform === "shoptet") {
-      if (c.permission === "read_write")
-        throw new Error("Shoptet is read-only");
+      if (c.permission === "read_write" && c.shoptetWriteAcknowledged !== true)
+        throw new Error("Shoptet master-only write acknowledgement required");
       a = new ShoptetAdapter(
         c.id,
         c.shoptetEshopId!,
         c.shoptetAccess || "private",
         env[c.credentialEnv ?? ""] || "",
+        undefined,
+        c.permission === "read_write" && c.shoptetWriteAcknowledged === true,
       );
     } else throw new Error("Unsupported platform");
     if (c.permission !== "read_write") {

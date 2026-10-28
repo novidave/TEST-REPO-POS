@@ -278,9 +278,7 @@
                 </option>
                 <option value="woocommerce">WooCommerce</option>
                 <option value="shopify">Shopify</option>
-                <option value="shoptet">
-                  Shoptet — read only, API access required
-                </option>
+                <option value="shoptet">Shoptet — API access required</option>
                 <option value="pos">Local POS — driver required</option>
                 <option value="cacaduu">CACADUU Cloud — optional</option>
               </select></label
@@ -301,6 +299,12 @@
                 <option value="private">Private API (Premium)</option>
                 <option value="addon">Approved add-on API token</option>
               </select></label
+            ><label data-field="shoptetWrite"
+              ><input type="checkbox" name="shoptetWriteAcknowledged" />Enable
+              master-only updates to stock available for ordering. I have
+              matched source quantity meaning and coordinated other stock
+              writers. Changes are not atomic; two-way sync is
+              unavailable.</label
             ><label data-field="shopDomain"
               >Shop domain<input
                 name="shopDomain"
@@ -660,6 +664,11 @@
               <option value="private">Private API (Premium)</option>
               <option value="addon">Approved add-on API token</option>
             </select></label
+          ><label id="wizard-shoptet-write-field" hidden
+            ><input id="wizard-shoptet-write" type="checkbox" />Enable
+            master-only updates to stock available for ordering. I have matched
+            source quantity meaning and coordinated other stock writers. Changes
+            are not atomic; two-way sync is unavailable.</label
           ><label id="wizard-format-field" hidden
             >File format<select id="wizard-format">
               <option value="supported">CSV / XML / JSON</option>

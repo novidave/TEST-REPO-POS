@@ -900,7 +900,7 @@ test("header inspection exposes only format metadata and cannot save connections
   assert.equal(service.connections().length, 0);
   assert.equal(service.snapshot().history.length, 0);
 });
-test("Shoptet native setup encrypts tokens, binds the expected shop and forbids writes", async (t) => {
+test("Shoptet native setup encrypts tokens, binds the expected shop and defaults to read only", async (t) => {
   const { service, dir } = await fixture(t);
   const c = await service.saveConnection({
     name: "Shoptet",
@@ -924,7 +924,7 @@ test("Shoptet native setup encrypts tokens, binds the expected shop and forbids 
   );
   await assert.rejects(
     service.saveConnection({ ...c, permission: "read_write" }),
-    /read-only/,
+    /Acknowledge Shoptet/,
   );
   await assert.rejects(
     service.saveConnection({
@@ -996,5 +996,80 @@ test("Shoptet can be a bound read-only group source but never a destination or t
       members: g.members.map((m) => ({ ...m, role: "both" })),
     }),
     /atomic|Read-only/,
+  );
+});
+test("Shoptet master destination requires deliberate write opt-in and still rejects two-way groups", async (t) => {
+  const { service } = await fixture(t);
+  const input = {
+    id: "shoptet-target",
+    name: "Shoptet target",
+    platform: "shoptet",
+    shoptetEshopId: 123,
+    shoptetAccess: "private",
+    permission: "read_write",
+    token: "private-token",
+  };
+  await assert.rejects(service.saveConnection(input), /Acknowledge/);
+  assert.equal(service.connections().length, 0);
+  await service.saveConnection({ ...input, shoptetWriteAcknowledged: true });
+  const adapter = await service.adapter(input.id);
+  assert.equal(adapter.capabilities.write, true);
+  assert.equal(typeof adapter.write, "function");
+  assert.equal(adapter.capabilities.compareAndSwap, false);
+  await service.saveConnection({
+    id: "file-source",
+    name: "File authority",
+    platform: "file",
+    stockPath: "test.csv",
+    permission: "read",
+  });
+  const group = {
+    id: "master-to-shoptet",
+    mode: "master",
+    masterId: "file-source",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "file-source", role: "source" },
+      { connectionId: input.id, role: "destination" },
+    ],
+    mappings: {
+      "file-source": { local: "shared" },
+      [input.id]: { "001": "shared" },
+    },
+    locationMappings: {
+      "file-source": { warehouse: "main" },
+      [input.id]: { 1: "main" },
+    },
+  };
+  await service.saveGroup(group);
+  assert.equal(service.groups()[0].members[1].role, "destination");
+  await service.saveConnection({
+    id: "other-writer",
+    name: "Other writer",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  await assert.rejects(
+    service.saveGroup({
+      ...group,
+      id: "bad-two-way",
+      mode: "two_way",
+      members: [
+        { connectionId: input.id, role: "both" },
+        { connectionId: "other-writer", role: "both" },
+      ],
+      mappings: {
+        [input.id]: { "001": "shared" },
+        "other-writer": { remote: "shared" },
+      },
+      locationMappings: {
+        [input.id]: { 1: "main" },
+        "other-writer": { location: "main" },
+      },
+    }),
+    /atomic/,
   );
 });

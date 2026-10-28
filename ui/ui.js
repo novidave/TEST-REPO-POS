@@ -436,22 +436,21 @@ function platformFields() {
     woocommerce: ["baseUrl", "token", "secret"],
     shopify: ["shopDomain", "token"],
     pos: [],
-    shoptet: ["shoptetEshopId", "shoptetAccess", "token"],
+    shoptet: ["shoptetEshopId", "shoptetAccess", "shoptetWrite", "token"],
     cacaduu: [],
   }[platform];
   document.querySelectorAll("[data-field]").forEach((e) => {
     e.hidden = !visible.includes(e.dataset.field);
   });
   const permission = cf.elements.permission;
-  permission.disabled = [
-    "odoo",
-    "erpnext",
-    "file",
-    "pos",
-    "shoptet",
-    "cacaduu",
-  ].includes(platform);
+  permission.disabled = ["odoo", "erpnext", "file", "pos", "cacaduu"].includes(
+    platform,
+  );
   if (permission.disabled) permission.value = "read";
+  cf.elements.shoptetWriteAcknowledged.disabled =
+    platform !== "shoptet" || permission.value !== "read_write";
+  if (cf.elements.shoptetWriteAcknowledged.disabled)
+    cf.elements.shoptetWriteAcknowledged.checked = false;
   $("platform-help").textContent = {
     odoo: "Odoo 18 read-only internal stock. API access must be permitted by your hosting plan and stock user rights. Enter username and API key; no writes or fractional-unit conversion.",
     erpnext:
@@ -462,7 +461,7 @@ function platformFields() {
     shopify:
       "Admin API inventory read/write scopes required. Atomic compareQuantity writes. Test with a development store first.",
     shoptet:
-      "API access required: private API (Premium) or an approved add-on API token. Read-only stock source; expected e-shop ID is verified before stock reads. Whole zero-claim stock only. Writes and two-way sync are unavailable; live staging pending.",
+      "API access required: private API (Premium) or an approved add-on API token. Native reads and opt-in master-only available-stock updates; expected e-shop ID is verified first. Whole zero-claim stock only. Writes have no atomic revision check; coordinate other writers. No two-way sync; live staging pending.",
     pos: "Setup required: no vendor driver is bundled. Use a verified CSV/XML export from your POS.",
     cacaduu:
       "Optional Phase A pairing is available in Settings. Cloud inventory is not an active group destination.",
@@ -484,6 +483,8 @@ function editConnection(c) {
     "permission",
   ])
     if (c[key] !== undefined) cf.elements[key].value = c[key];
+  cf.elements.shoptetWriteAcknowledged.checked =
+    c.shoptetWriteAcknowledged === true;
   cf.elements.platform.disabled = true;
   cf.elements.database.readOnly = true;
   cf.elements.shoptetEshopId.readOnly = true;
@@ -509,6 +510,7 @@ $("new-connection").onclick = () => {
   platformFields();
 };
 cf.elements.platform.onchange = platformFields;
+cf.elements.permission.onchange = platformFields;
 $("cancel-connection").onclick = () => {
   cf.reset();
   cf.hidden = true;
@@ -556,6 +558,14 @@ cf.onsubmit = (e) => {
       data[key] = cf.elements[key].value;
     try {
       if (data.platform === "file") data.csvImport = readCsvProfile();
+      if (data.platform === "shoptet") {
+        data.shoptetWriteAcknowledged =
+          cf.elements.shoptetWriteAcknowledged.checked;
+        if (data.permission === "read_write" && !data.shoptetWriteAcknowledged)
+          throw new Error(
+            "Acknowledge Shoptet master-only available-stock updates before enabling writes.",
+          );
+      }
       await window.desktop.saveConnection(data);
       cf.hidden = true;
       return "Connection saved. Run a read test before configuring synchronization.";
@@ -745,7 +755,7 @@ const integrationMethods = [
     description: "Connect to supported online inventory APIs.",
     path: "POS provider → authenticated API → inventory workspace",
     examples: "Shoptet, ERPNext, WooCommerce, Shopify · Odoo in advanced setup",
-    state: "Shoptet / ERPNext read-only · WooCommerce / Shopify implemented",
+    state: "Shoptet master updates · ERPNext read-only · WooCommerce / Shopify",
     vendor: [
       "ERPNext",
       "Shoptet",
@@ -1087,6 +1097,7 @@ function wizardFields() {
     "wizard-domain-field": platform === "shopify",
     "wizard-shoptet-id-field": platform === "shoptet",
     "wizard-shoptet-access-field": platform === "shoptet",
+    "wizard-shoptet-write-field": platform === "shoptet",
     "wizard-file-field": wizardKind === "file",
     "wizard-format-field": wizardKind === "file",
     "wizard-csv-import": platform === "file",
@@ -1130,12 +1141,15 @@ function wizardFields() {
       regional.stockCaveat;
   if (platform === "shoptet")
     $("wizard-config-help").textContent =
-      "API access required: private API (Premium) or an approved add-on API token. Native read-only stock source, bound to the expected e-shop ID. Whole zero-claim stock only; no writes or two-way sync. Without API access you can save setup metadata; no successful connection is claimed.";
+      "API access required: private API (Premium) or an approved add-on API token. Native stock reads and opt-in master-only updates to stock available for ordering, bound to the expected e-shop ID. Whole zero-claim stock only. Writes are not atomic; coordinate other writers. No two-way sync. Without API access you can save setup metadata; no successful connection is claimed.";
   $("wizard-preview").hidden = platform !== "file";
-  $("wizard-permission").disabled =
-    !supportedCloud || ["erpnext", "shoptet"].includes(platform);
-  if (!supportedCloud || ["erpnext", "shoptet"].includes(platform))
+  $("wizard-permission").disabled = !supportedCloud || platform === "erpnext";
+  if (!supportedCloud || platform === "erpnext")
     $("wizard-permission").value = "read";
+  $("wizard-shoptet-write").disabled =
+    platform !== "shoptet" || $("wizard-permission").value !== "read_write";
+  if ($("wizard-shoptet-write").disabled)
+    $("wizard-shoptet-write").checked = false;
 }
 function wizardDraft() {
   const name = $("wizard-name").value.trim(),
@@ -1169,6 +1183,11 @@ function wizardDraft() {
   } else if (platform === "shoptet") {
     draft.shoptetEshopId = $("wizard-shoptet-id").value;
     draft.shoptetAccess = $("wizard-shoptet-access").value;
+    draft.shoptetWriteAcknowledged = $("wizard-shoptet-write").checked;
+    if (draft.permission === "read_write" && !draft.shoptetWriteAcknowledged)
+      throw new Error(
+        "Acknowledge Shoptet master-only available-stock updates before enabling writes.",
+      );
     draft.token = $("wizard-username").value;
   } else if (platform === "shopify") {
     draft.shopDomain = $("wizard-domain").value.trim();
@@ -1350,6 +1369,7 @@ $("wizard-provider").onchange = () => {
   wizardFields();
 };
 $("wizard-format").onchange = wizardFields;
+$("wizard-permission").onchange = wizardFields;
 $("wizard-preview").onclick = () => wizardAction(previewWizardFile);
 $("wizard-choose-file").onclick = () =>
   wizardAction(async () => {

@@ -52,10 +52,10 @@ export const connectorCapabilities = [
     name: "Shoptet",
     state: "implemented",
     read: true,
-    write: false,
+    write: true,
     twoWay: false,
     detail:
-      "Read-only native stock API; merchant access/token and bound e-shop ID required; zero-claim whole stock only; live staging pending",
+      "Native reads and opt-in master-only available-stock writes; no atomic CAS/two-way; zero-claim whole stock only; merchant API access and staging required",
   },
   {
     platform: "pos",

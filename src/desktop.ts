@@ -31,6 +31,7 @@ export interface DesktopConnection {
   shopDomain?: string;
   shoptetEshopId?: number;
   shoptetAccess?: "private" | "addon";
+  shoptetWriteAcknowledged?: boolean;
   stockPath?: string;
   csvImport?: CsvImportProfile;
   permission: "read" | "read_write";
@@ -207,9 +208,7 @@ export class DesktopService {
     if (value.permission !== "read" && value.permission !== "read_write")
       throw new UserError("Permission required");
     if (
-      ["odoo", "erpnext", "file", "shoptet", "pos", "cacaduu"].includes(
-        platform,
-      ) &&
+      ["odoo", "erpnext", "file", "pos", "cacaduu"].includes(platform) &&
       value.permission !== "read"
     )
       throw new UserError("This connection is read-only or setup-required");
@@ -252,6 +251,17 @@ export class DesktopService {
       if (!["private", "addon"].includes(access as string))
         throw new UserError("Invalid Shoptet API access type");
       c.shoptetAccess = access as "private" | "addon";
+      if (value.permission === "read_write") {
+        if (value.shoptetWriteAcknowledged !== true)
+          throw new UserError(
+            "Acknowledge Shoptet master-only available-stock writes and coordinate other stock writers before enabling writes",
+          );
+        if (!c.shoptetEshopId)
+          throw new UserError(
+            "Bind a Shoptet e-shop ID before enabling writes",
+          );
+        c.shoptetWriteAcknowledged = true;
+      }
       if (c.shoptetEshopId) c.status = "not_tested";
       if (previous && previous.shoptetEshopId !== c.shoptetEshopId)
         throw new UserError(
@@ -463,6 +473,8 @@ export class DesktopService {
           c.shoptetEshopId!,
           c.shoptetAccess || "private",
           credentials.token || "",
+          undefined,
+          c.permission === "read_write" && c.shoptetWriteAcknowledged === true,
         );
         break;
       default:

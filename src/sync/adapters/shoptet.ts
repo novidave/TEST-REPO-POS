@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { UserError } from "../../security";
 import { governedFetch, providerFailure } from "../http";
 import { validateStock } from "../engine";
-import type { InventoryAdapter, Stock } from "../types";
+import type { InventoryAdapter, Stock, StockWrite } from "../types";
 export type ShoptetAccess = "private" | "addon";
 const origin = "https://api.myshoptet.com";
 function record(value: unknown): Record<string, unknown> {
@@ -23,20 +24,24 @@ function whole(value: unknown): number {
 /** Independently authored against pinned official OpenAPI. No schema, SDK or upstream implementation is bundled. */
 export class ShoptetAdapter implements InventoryAdapter {
   readonly platform = "shoptet" as const;
-  readonly capabilities = {
-    read: true,
-    write: false,
-    locations: true,
-    webhooks: false,
-    compareAndSwap: false,
-  };
+  readonly capabilities;
+  readonly write?: (updates: StockWrite[]) => Promise<void>;
   constructor(
     readonly id: string,
     private readonly eshopId: number,
     private readonly access: ShoptetAccess,
     private readonly token: string,
     private readonly http: typeof fetch = governedFetch,
+    writeEnabled = false,
   ) {
+    this.capabilities = {
+      read: true,
+      write: writeEnabled,
+      locations: true,
+      webhooks: false,
+      compareAndSwap: false,
+    };
+    if (writeEnabled) this.write = (updates) => this.writeStock(updates);
     if (
       !Number.isSafeInteger(eshopId) ||
       eshopId <= 0 ||
@@ -48,13 +53,19 @@ export class ShoptetAdapter implements InventoryAdapter {
         "Shoptet API access, expected e-shop ID and API token required",
       );
   }
-  private async get(path: string): Promise<Record<string, unknown>> {
+  private async request(
+    path: string,
+    method: "GET" | "PATCH",
+    payload?: unknown,
+  ): Promise<unknown> {
     const response = await this.http(origin + path, {
-      method: "GET",
+      method,
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
       redirect: "error",
       signal: AbortSignal.timeout(30000),
       headers: {
         Accept: "application/json",
+        ...(method === "PATCH" ? { "Content-Type": "application/json" } : {}),
         [this.access === "private"
           ? "Shoptet-Private-API-Token"
           : "Shoptet-Access-Token"]: this.token,
@@ -69,13 +80,16 @@ export class ShoptetAdapter implements InventoryAdapter {
       throw new UserError(
         "Shoptet reported an API error; no partial stock accepted",
       );
-    return record(body.data);
+    return body.data;
+  }
+  private async get(path: string): Promise<Record<string, unknown>> {
+    return record(await this.request(path, "GET"));
   }
   private async verifyShop() {
     const data = await this.get("/api/eshop");
     if (record(data.contactInformation).eshopId !== this.eshopId)
       throw new UserError(
-        "Shoptet token belongs to a different e-shop; inventory was not read",
+        "Shoptet token belongs to a different e-shop; inventory access refused",
       );
   }
   private stockId(value: unknown): string {
@@ -155,6 +169,19 @@ export class ShoptetAdapter implements InventoryAdapter {
           onHand: amount,
           available: null,
           observedAt: new Date().toISOString(),
+          // A local snapshot fingerprint, not a server-side CAS token.
+          revision: createHash("sha256")
+            .update(
+              JSON.stringify([
+                stockId,
+                r.code,
+                r.productGuid,
+                r.amount,
+                r.claim,
+                r.changeTime ?? null,
+              ]),
+            )
+            .digest("hex"),
         });
       }
       if (page >= Number(p.pageCount)) {
@@ -209,5 +236,50 @@ export class ShoptetAdapter implements InventoryAdapter {
     if (rows.length > 1)
       throw new UserError("Shoptet mapped item is ambiguous");
     return rows[0];
+  }
+  private async writeStock(updates: StockWrite[]): Promise<void> {
+    // One product per request avoids treating a partially accepted batch as atomic.
+    if (!Array.isArray(updates) || updates.length !== 1)
+      throw new UserError(
+        "Shoptet requires one queued product update per request",
+      );
+    const update = updates[0];
+    if (
+      !update ||
+      typeof update.productKey !== "string" ||
+      !update.productKey.trim() ||
+      typeof update.location !== "string" ||
+      !/^\d+$/.test(update.location) ||
+      String(Number(update.location)) !== update.location ||
+      !Number.isSafeInteger(Number(update.location)) ||
+      !Number.isSafeInteger(update.quantity) ||
+      update.quantity < 0 ||
+      typeof update.operationId !== "string" ||
+      !update.operationId.trim() ||
+      typeof update.expectedRevision !== "string" ||
+      !update.expectedRevision.trim()
+    )
+      throw new UserError(
+        "Shoptet exact SKU, stock ID, whole quantity and queued revision required",
+      );
+    const current = await this.readOne(update.productKey, update.location);
+    if (!current)
+      throw new UserError(
+        "Mapped Shoptet destination item is missing; no product was created",
+      );
+    if ((current.available ?? current.onHand) === update.quantity) return;
+    if (current.revision !== update.expectedRevision)
+      throw new UserError(
+        "Shoptet stock changed before write; reconcile the queued job",
+      );
+    await this.request(`/api/stocks/${update.location}/movements`, "PATCH", {
+      data: [{ productCode: update.productKey, quantity: update.quantity }],
+    });
+    // Never declare success from HTTP status alone, and never blindly resend an uncertain write.
+    const after = await this.readOne(update.productKey, update.location);
+    if (!after || (after.available ?? after.onHand) !== update.quantity)
+      throw new UserError(
+        "Shoptet write outcome is uncertain; verify stock before retrying",
+      );
   }
 }

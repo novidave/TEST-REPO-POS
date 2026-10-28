@@ -1,8 +1,10 @@
-# Public API catalog review
+# Historical public API catalog review
+
+The user subsequently restricted implementation resources to official vendor sources. This earlier discovery record is retained for traceability only; it is not protocol evidence or an approved implementation source.
 
 User-provided organization: <https://github.com/public-apis>. Reviewed repository: [public-apis/public-apis](https://github.com/public-apis/public-apis), commit `9fb5cd0bcdce23cf09de555c6c2dc143998c53d3`, README SHA-256 `da54f3235913f6938cda2176d03837790a215ae6b8738ebba7cc10d1bc0a94ec` on 2026-10-28. Only discovery links/notes are retained here; no catalog content or implementation was copied into the app.
 
-Shoptet was not listed in the inspected catalog. Its connector instead uses the vendor-owned `shoptet/developers` OpenAPI source; see [SHOPTET.md](SHOPTET.md). **Shoptet remains the first priority**, including the required merchant API access and unfinished destination/reservation support.
+Shoptet was not listed in the inspected catalog. Its connector instead uses the vendor-owned `shoptet/developers` OpenAPI source; see [SHOPTET.md](SHOPTET.md). **Shoptet remains the first priority**, including the required merchant API access and merchant activation, non-atomic write validation and unfinished reservation support.
 
 | Catalog lead | Relevance | Decision |
 |---|---|---|

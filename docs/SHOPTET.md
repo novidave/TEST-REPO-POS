@@ -1,45 +1,69 @@
-# Shoptet — priority native connector
+# Shoptet — native inventory API
 
-## Current scope
+## Implemented and tested
 
-A native **read-only** Shoptet stock driver is implemented against the official [pinned OpenAPI contract](connector-contracts/shoptet/CONTRACT.json). It is tested with mocks and temporary stores, not a merchant shop. The user currently has **no API access**, so a live connection cannot be activated yet. Saving a preparation entry never claims successful authentication.
+The native connector implements inventory reads and **opt-in, master-source stock updates** using Shoptet's official [pinned OpenAPI contract](connector-contracts/shoptet/CONTRACT.json). Protocol tests use mocked responses and temporary stores. The user has no API access yet: no live merchant request, stock update or staging validation has been performed.
 
-Implemented: exact expected e-shop identity check; all stock/warehouse discovery; paginated product supplies; stable count/page-size checks; exact variant-code/warehouse mapping; encrypted token storage; controlled API/authentication errors; Retry-After handling through the shared governor. Token values and upstream error bodies do not enter logs. Requests go only to the official fixed HTTPS API origin; credentials cannot be redirected to an arbitrary server.
+Reads verify the expected e-shop ID, discover warehouses and page through product supplies. Private API and approved add-on API-token headers are separate; tokens stay in the encrypted OS vault. Writes call `PATCH /api/stocks/{stockId}/movements` with one `{ productCode, quantity }` entry, where **quantity means the absolute amount available for ordering**. The connector never sends relative `amountChange`, physical `realStock`, a guessed reservation adjustment or a fabricated idempotency header.
 
-Not implemented: inventory writes, two-way sync, webhooks, add-on installation/OAuth callback server, automatic add-on API-token renewal, or catalogue price/name/currency enrichment. Read permission is fixed. A Shoptet connection can be a master/source, never a write destination or two-way member. This does **not** yet satisfy POS-to-Shoptet stock delivery; that remains explicit follow-up work.
+A Shoptet connection defaults to read only. To use it as a master group's destination, choose Read/write and acknowledge the quantity meaning and coordination of other stock writers. This opt-in is validated in both desktop and CLI configuration. Existing read-only connections stay read only. Pause affected groups before changing permissions. The app's existing manual Sync Now confirmation still applies.
 
-## Getting access
+## Concurrency, reservations and recovery
 
-The official contract distinguishes two routes:
+- **No two-way synchronization.** The documented movement API provides no atomic revision/CAS check. The capability is explicitly false, even when writes are enabled, and two-way groups are rejected.
+- **Whole, nonnegative, zero-claim stock only.** Nonzero reservations (`claim`), missing/fractional/negative amounts, incomplete mappings or duplicate stock rows are refused. This boundary must be revisited with official reservation semantics and staging evidence before supporting reserved stock. A claim appearing during the pre-write read prevents the PATCH.
+- A local stock fingerprint includes warehouse, variant identity, amount, claim and returned change time. The writer re-reads and checks the planned fingerprint before PATCH; it then reads back the resulting quantity. This fingerprint is a client preflight check, **not** a server-validated revision token or atomic lock.
+- A sale or another stock writer can race between the last read and PATCH. Coordinate/stop competing stock writers during controlled staging/master updates. The acknowledgement does not remove this API limitation; concurrent live sales are not certified safe.
+- One queued product is sent per request. Multi-item batches are rejected locally, so a partially accepted batch cannot mark multiple jobs successful.
+- HTTP 200 with any API `errors` is a failure. HTTP status alone never declares a write successful. Successful PATCH responses can contain null data; success additionally requires a valid matching read-back.
+- The durable queue records the attempt before network I/O. If a request applied but the connection or app failed, the next due attempt reads the destination and reconciles an already reached target without sending another PATCH. If the outcome remains uncertain, a non-atomic retry is **held for manual reconciliation**, not blindly resent. Missing/changed stock is also held.
+- 401/403/429/5xx use controlled status errors and existing Retry-After/deadline handling. A failed/throttled Shoptet destination does not prevent an independently valid destination from completing. A throttled attempted non-atomic write may still need reconciliation before a second attempt; this is deliberately conservative.
 
-- **Private API (Premium):** merchant-created token in the shop administration's Access to API section, using `Shoptet-Private-API-Token`. The documented access route is Premium; confirm current eligibility/terms with Shoptet. Grant only required read endpoint groups for e-shop information and stocks/supplies.
-- **Approved add-on:** approved developer/add-on access and merchant installation/authorization. A trusted add-on backend performs installation/OAuth and obtains a short-lived API token; the desktop sends that API token in `Shoptet-Access-Token`. Do not paste the permanent OAuth installation token, client secret or callback authorization code into this field. This app does not implement the add-on broker; expired API tokens produce a controlled authentication error and need secure replacement.
+## Getting API access
 
-Do not share tokens in chat. A public API listing does not grant credentials, approval or licence entitlement. The app cannot enable Shoptet API access for a merchant.
+Only Shoptet-owned documentation and its vendor-owned developer repository are implementation resources. The official contract distinguishes:
 
-## Desktop setup
+- **Private API (Premium):** merchant-created API token in shop administration → Access to API, sent as `Shoptet-Private-API-Token`. Confirm current eligibility/terms with Shoptet. Grant the e-shop information and stock read rights; add stock write rights only when enabling updates.
+- **Approved add-on:** approved developer/add-on access plus merchant installation/authorization. A trusted add-on backend performs installation/OAuth and obtains a short-lived API token; the desktop sends it as `Shoptet-Access-Token`. Do not enter the permanent OAuth installation token, client secret or callback code here. Installation/OAuth broker and automatic API-token renewal are not implemented. An expired token produces an authentication error and needs secure replacement.
 
-Use POS Connections → Cloud API → Shoptet, or the advanced Shoptet form. Enter a name, API access type, **expected numeric e-shop ID**, and the corresponding API token. The e-shop ID must come from the merchant/admin; it is not guessed from a domain. The first request checks `data.contactInformation.eshopId` from `/api/eshop` before reading stock. Tokens for another shop are rejected.
+Do not share tokens in chat. API directories do not grant access, approval or licence entitlement. This app cannot enable merchant API access.
 
-The ID is immutable after creation. If you saved preparation without an ID, create a new bound connection when access is available. Token replacement for the same bound shop remains allowed and encrypted. Missing ID/token returns `setup_required`; the app does not make a speculative request.
+## Desktop and CLI setup
 
-After obtaining access, first use a non-production shop or permitted read-only staging setup. Test read, inspect SKUs and warehouse IDs, and review stock meaning/units before configuring a master group with explicit mappings. The source is not suitable for live deployment until staging checks pass.
+Use POS Connections → Cloud API → Shoptet, or the advanced Shoptet form. Enter the expected numeric e-shop ID from the merchant/admin, the correct access type and its API token. The first inventory request sequence checks `data.contactInformation.eshopId` from `/api/eshop`; a token for another shop is rejected before stock access.
 
-CLI entries use `platform: "shoptet"`, `shoptetEshopId: 123`, `shoptetAccess: "private"` (or `"addon"`), `permission: "read"` and `credentialEnv: "YOUR_SHOPTET_API_TOKEN_VARIABLE"`. Only the environment-variable name goes into configuration, never its credential value. The desktop uses the encrypted OS vault.
+The e-shop ID is immutable after creation. If preparation was saved without an ID, create a new bound connection when access is available. Same-shop token replacement is encrypted. Missing ID/token stays `setup_required`, including for write-enabled preparation. Test read never writes or proves write permissions.
 
-## Inventory boundaries
+First validate a non-production/authorized staging shop. Inspect actual variant codes, warehouse IDs and units. For outgoing updates, verify that the source quantity means stock **available for ordering** in Shoptet, and configure one master authority with explicit product/warehouse maps. No unit or reservation conversion is assumed.
 
-- Variant `code` is the SKU/product mapping key, including leading zeroes and variant suffixes. Numeric stock `id` is the warehouse mapping key. Shelf `location` is not used as a warehouse identity.
-- The API's `amount` is copied as reported on-hand stock. `available` remains unknown; no reservation arithmetic or sales-derived stock is invented. `observedAt` is the actual API observation time, not a manufactured stock-change timestamp.
-- **Initial restriction: whole nonnegative amounts with zero claims only.** Nonzero `claim`, null/fractional/negative quantities, missing identities, repeated rows, empty total stock or inconsistent/moving pagination fail closed. This conservative boundary must be revisited with authoritative reservation semantics and staging fixtures before supporting reserved stock.
-- Pagination starts at one. Count/page size must remain stable; at most 1,000 pages per warehouse, 1,000 warehouses and 100,000 total observations are accepted. Reads are sequential under the shared request governor. They are not a transactional snapshot and same-size concurrent catalogue edits may require another complete read.
-- API `errors` are checked even after HTTP 200. Partial-error payloads are refused. 401/403/429/5xx are controlled failures; automatic authentication or inventory success is never inferred.
-- No catalogue prices/names/currencies are invented. Default local export fails validation and preserves any previous valid stock.csv/manifest; independently valid group destinations retain their existing failure isolation.
+CLI connection example (the credential environment variable **name**, not a token value, goes into JSON):
 
-## Protocol and licence evidence
+```json
+{
+  "id": "shoptet-destination",
+  "platform": "shoptet",
+  "shoptetEshopId": 123,
+  "shoptetAccess": "private",
+  "credentialEnv": "YOUR_SHOPTET_API_TOKEN_VARIABLE",
+  "permission": "read_write",
+  "shoptetWriteAcknowledged": true
+}
+```
 
-Inspected official repository: `shoptet/developers`, commit `d874246dcd779a365d6890c833e76b7deba166ed`, `openapi/openapi.yaml`. This was available on the vendor's GitHub repository despite the environment denying the separate developers.shoptet.com host. The contract record contains the inspected SHA-256 and source URL.
+Omit write permission/acknowledgement for a read-only source. Desktop profiles use the OS-encrypted vault instead of environment credentials.
 
-No root LICENSE file was found in that upstream snapshot. No upstream schema, examples, SDK or implementation is copied or bundled. The driver and protocol summary are independently authored. Merchant/API/add-on terms remain separate, and the application's own licence is still undeclared. No new dependency was added.
+## Read and export boundaries
 
-Next acceptance work: obtain merchant API eligibility; validate shop binding, permissions, multi-warehouse variant stock, claims and units on a staging shop; determine safe master-destination write behavior and partial/uncertain-write recovery against the official movement API before enabling writes. Do not enable two-way sync without verified atomic revision checks.
+Variant `code` is the SKU/product mapping key (leading zeroes and variant suffixes preserved). Numeric stock ID is the warehouse mapping key; shelf `location` is not a warehouse. The API `amount` is copied as reported on-hand stock and `available` remains unknown; nonzero claims are refused, so no reservation subtraction is guessed. `observedAt` is the actual API observation time, not an invented stock-change timestamp.
+
+Pagination starts at one, requires stable totals/page size, and rejects repeated/incomplete data. Limits are 1,000 pages/warehouse, 1,000 warehouses and 100,000 total rows. Reads are sequential through the shared request governor. They are not transactional snapshots; same-size concurrent catalogue changes can require another complete read.
+
+No product prices, names or currencies are fabricated. Local stock.csv/manifest export fails validation and preserves previous valid files when verified catalogue metadata is absent. Other valid destinations retain independent failure handling. Webhooks, catalogue enrichment, fractional stock, reservation reconciliation, OAuth installation and live merchant certification remain incomplete.
+
+## Official evidence and licences
+
+Source: vendor-owned `shoptet/developers`, commit `d874246dcd779a365d6890c833e76b7deba166ed`, `openapi/openapi.yaml`. The pinned record includes its SHA-256, endpoint paths and write semantics. No community client or API-directory description is used as protocol evidence.
+
+No root LICENSE file was found in that upstream snapshot. No vendor schema, examples, SDK or implementation is copied/bundled. The protocol client and summary are independently authored, with no new dependency. Merchant/API/add-on terms remain separate; no entitlement or certification is implied. The application licence is still undeclared.
+
+Before production: obtain API access, verify read/write endpoint-group permissions, run controlled staging tests for variants/warehouses/units and response/read-back behavior, and review the explicit non-atomic/race limitations. Windows startup/DPAPI and real merchant behavior are not established by Linux tests or Windows cross-building.

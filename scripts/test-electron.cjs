@@ -15,7 +15,7 @@ const { join, resolve } = require("node:path");
     );
     const packaged = process.argv.includes("--packaged");
     const scale = process.argv.includes("--scale");
-    const expectedConnections = scale ? 120 : 1;
+    const expectedConnections = scale ? 120 : 2;
     const executablePath = packaged
       ? resolve(
           "release",
@@ -142,9 +142,22 @@ const { join, resolve } = require("node:path");
       nodeIntegration: false,
     });
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
+    const shoptetSetup = await page.evaluate(async () => {
+      await window.desktop.saveConnection({
+        id: "shoptet-setup",
+        name: "Shoptet setup (no API access)",
+        platform: "shoptet",
+        shoptetEshopId: 123,
+        shoptetAccess: "private",
+        permission: "read_write",
+        shoptetWriteAcknowledged: true,
+      });
+      return window.desktop.testConnection("shoptet-setup");
+    });
+    assert.equal(shoptetSetup.state, "setup_required");
     if (scale) {
       await page.evaluate(async (path) => {
-        for (let i = 1; i < 120; i++)
+        for (let i = 2; i < 120; i++)
           await window.desktop.saveConnection({
             id: "scale-" + i,
             name: "Scale fixture " + String(i).padStart(3, "0"),
@@ -228,6 +241,15 @@ const { join, resolve } = require("node:path");
     );
     const restored = await reopened.evaluate(() => window.desktop.snapshot());
     assert.equal(restored.connections.length, expectedConnections);
+    const restoredShoptet = restored.connections.find(
+      (c) => c.id === "shoptet-setup",
+    );
+    assert.equal(restoredShoptet.shoptetEshopId, 123);
+    assert.equal(restoredShoptet.permission, "read_write");
+    assert.equal(restoredShoptet.shoptetWriteAcknowledged, true);
+    console.log(
+      "Shoptet opt-in setup persisted; missing API access correctly stays setup-required",
+    );
     assert.equal(restored.connections[0].id, id);
     assert.equal(restored.connections[0].status, "authenticated_read_ok");
     assert.deepEqual(

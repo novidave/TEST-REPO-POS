@@ -22,6 +22,7 @@ function fixture({
   rows = [supply()],
   handler,
   eshopId = 123,
+  writeEnabled = false,
 } = {}) {
   const calls = [];
   const adapter = new ShoptetAdapter(
@@ -33,7 +34,9 @@ function fixture({
       calls.push({ url, init });
       const q = new URL(url);
       assert.equal(q.origin, "https://api.myshoptet.com");
-      assert.equal(init.method, "GET");
+      assert.ok(
+        init.method === "GET" || (writeEnabled && init.method === "PATCH"),
+      );
       assert.equal(init.redirect, "error");
       assert.doesNotMatch(url, /private-token/);
       let data =
@@ -42,11 +45,12 @@ function fixture({
           : q.pathname === "/api/stocks"
             ? { stocks: [{ id: 1 }] }
             : paged(rows);
-      const override = await handler?.(q, calls.length);
+      const override = await handler?.(q, calls.length, init);
       if (override instanceof Response) return override;
       if (override !== undefined) data = override;
       return new Response(JSON.stringify({ data, errors: null, metadata: {} }));
     },
+    writeEnabled,
   );
   return { adapter, calls };
 }
@@ -213,4 +217,337 @@ test("native Shoptet reads feed the master coordinator and repeated polls do not
   assert.equal(writes, 1);
   assert.deepEqual((await runGroup(group, store)).errors, []);
   assert.equal(writes, 1);
+});
+const job = (revision, quantity = 7) => ({
+  productKey: "001",
+  location: "1",
+  quantity,
+  expectedRevision: revision,
+  operationId: "stable-job",
+});
+test("Shoptet opt-in writes use the official absolute available-stock PATCH and verify the resulting stock", async () => {
+  const rows = [supply()];
+  const { adapter, calls } = fixture({
+    writeEnabled: true,
+    rows,
+    handler: (url, n, init) => {
+      if (init.method === "PATCH") {
+        assert.equal(url.pathname, "/api/stocks/1/movements");
+        assert.deepEqual(JSON.parse(init.body), {
+          data: [{ productCode: "001", quantity: 7 }],
+        });
+        assert.equal(init.headers["Content-Type"], "application/json");
+        rows[0].amount = "7.000";
+        return null;
+      }
+    },
+  });
+  const before = await adapter.readOne("001", "1");
+  await adapter.write([job(before.revision)]);
+  assert.equal(adapter.capabilities.write, true);
+  assert.equal(adapter.capabilities.compareAndSwap, false);
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+  assert.equal((await adapter.readOne("001", "1")).onHand, 7);
+  await adapter.write([job(before.revision)]); // Already reached desired stock: no duplicate request.
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+});
+test("Shoptet rejects unsafe write arguments and multi-item batches before issuing any request", async () => {
+  const { adapter, calls } = fixture({ writeEnabled: true });
+  for (const updates of [
+    [],
+    [job("rev"), job("rev")],
+    [job("rev", -1)],
+    [job("rev", 1.5)],
+    [{ ...job("rev"), location: "../1" }],
+    [{ ...job("rev"), operationId: "" }],
+    [job(undefined)],
+  ])
+    await assert.rejects(adapter.write(updates));
+  assert.equal(calls.length, 0);
+});
+test("Shoptet detects changed revision, new claims and wrong shop before any stock PATCH", async () => {
+  for (const mode of ["revision", "claim", "shop", "missing"]) {
+    const rows = [supply()];
+    let shop = 123;
+    const { adapter, calls } = fixture({
+      writeEnabled: true,
+      rows,
+      handler: (url) =>
+        url.pathname === "/api/eshop"
+          ? { contactInformation: { eshopId: shop } }
+          : undefined,
+    });
+    const before = await adapter.readOne("001", "1");
+    if (mode === "revision") rows[0].changeTime = "2026-10-28T20:00:00+0100";
+    if (mode === "claim") rows[0].claim = "1.000";
+    if (mode === "shop") shop = 456;
+    if (mode === "missing") rows.length = 0;
+    await assert.rejects(adapter.write([job(before.revision)]));
+    assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 0);
+  }
+});
+test("Shoptet treats HTTP 200 item errors, failed verification and write throttling as failures without blind retries", async () => {
+  for (const mode of ["item-error", "unchanged", "throttle", "network"]) {
+    const { adapter, calls } = fixture({
+      writeEnabled: true,
+      handler: (url, n, init) => {
+        if (init.method !== "PATCH") return;
+        if (mode === "item-error")
+          return new Response(
+            JSON.stringify({
+              data: null,
+              errors: [{ message: "private-token" }],
+            }),
+          );
+        if (mode === "throttle")
+          return new Response("private-token", {
+            status: 429,
+            headers: { "Retry-After": "2" },
+          });
+        if (mode === "network") throw Error("private-token");
+        return null;
+      },
+    });
+    const before = await adapter.readOne("001", "1");
+    await assert.rejects(adapter.write([job(before.revision)]));
+    assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+  }
+});
+test("Shoptet uncertain write recovers from durable outbox without sending a second PATCH", async (t) => {
+  const { SqliteSyncStore } = require("../dist/src/sync/store.js");
+  const { runGroup } = require("../dist/src/sync/runner.js");
+  const { mkdtemp, rm } = require("node:fs/promises");
+  const { tmpdir } = require("node:os");
+  const { join } = require("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "shoptet-crash-"));
+  let store = new SqliteSyncStore(join(dir, "db"));
+  t.after(async () => {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const rows = [supply("001", "1.000")];
+  const { adapter, calls } = fixture({
+    writeEnabled: true,
+    rows,
+    handler: (url, n, init) => {
+      if (init.method === "PATCH") {
+        rows[0].amount =
+          String(JSON.parse(init.body).data[0].quantity) + ".000";
+        throw Error("Connection lost after vendor applied update");
+      }
+    },
+  });
+  const source = {
+    id: "source",
+    platform: "file",
+    capabilities: {
+      read: true,
+      write: false,
+      locations: true,
+      webhooks: false,
+      compareAndSwap: false,
+    },
+    read: async () => [
+      {
+        productKey: "local",
+        sku: "001",
+        location: "warehouse",
+        available: 7,
+        onHand: null,
+        observedAt: new Date().toISOString(),
+      },
+    ],
+  };
+  const group = {
+    id: "shoptet-write",
+    mode: "master",
+    masterId: "source",
+    enabled: true,
+    intervalMinutes: 5,
+    members: [
+      { adapter: source, role: "source" },
+      { adapter, role: "destination" },
+    ],
+    mappings: { source: { local: "shared" }, s: { "001": "shared" } },
+    locationMappings: { source: { warehouse: "main" }, s: { 1: "main" } },
+  };
+  assert.equal((await runGroup(group, store)).errors.length, 1);
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+  store.close();
+  store = new SqliteSyncStore(join(dir, "db"));
+  store.db
+    .prepare(
+      "UPDATE outbox SET next_attempt_at=NULL,created_at='2000-01-01T00:00:00Z' WHERE group_id=?",
+    )
+    .run(group.id);
+  assert.deepEqual((await runGroup(group, store)).errors, []);
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+  assert.equal(
+    store.db
+      .prepare("SELECT count(*) AS n FROM outbox WHERE state='done'")
+      .get().n,
+    1,
+  );
+});
+test("CLI Shoptet adapters require explicit write acknowledgement and keep read-only access as default", () => {
+  const { createAdapters } = require("../dist/src/sync/config.js");
+  const connection = {
+    id: "shoptet",
+    platform: "shoptet",
+    shoptetEshopId: 123,
+    shoptetAccess: "private",
+    credentialEnv: "TEST_SHOPTET_KEY",
+  };
+  const config = {
+    connections: [connection],
+    groups: [],
+    databasePath: "unused",
+    exportDirectory: "unused",
+  };
+  const env = { TEST_SHOPTET_KEY: "synthetic-key" };
+  assert.equal(createAdapters(config, env).get("shoptet").write, undefined);
+  assert.throws(
+    () =>
+      createAdapters(
+        {
+          ...config,
+          connections: [{ ...connection, permission: "read_write" }],
+        },
+        env,
+      ),
+    /acknowledgement/,
+  );
+  const adapter = createAdapters(
+    {
+      ...config,
+      connections: [
+        {
+          ...connection,
+          permission: "read_write",
+          shoptetWriteAcknowledged: true,
+        },
+      ],
+    },
+    env,
+  ).get("shoptet");
+  assert.equal(adapter.capabilities.write, true);
+  assert.equal(typeof adapter.write, "function");
+  assert.equal(adapter.capabilities.compareAndSwap, false);
+});
+async function writeGroupFixture(t, response) {
+  const { SqliteSyncStore } = require("../dist/src/sync/store.js");
+  const store = new SqliteSyncStore(":memory:");
+  t.after(() => store.close());
+  const { adapter, calls } = fixture({
+    writeEnabled: true,
+    rows: [supply("001", "1.000")],
+    handler: (url, n, init) =>
+      init.method === "PATCH" ? response() : undefined,
+  });
+  const source = {
+    id: "source",
+    platform: "file",
+    capabilities: {
+      read: true,
+      write: false,
+      locations: true,
+      webhooks: false,
+      compareAndSwap: false,
+    },
+    read: async () => [
+      {
+        productKey: "local",
+        sku: "001",
+        location: "warehouse",
+        available: 7,
+        onHand: null,
+        observedAt: new Date().toISOString(),
+      },
+    ],
+  };
+  const group = {
+    id: "master-shoptet",
+    mode: "master",
+    masterId: "source",
+    enabled: true,
+    intervalMinutes: 5,
+    members: [
+      { adapter: source, role: "source" },
+      { adapter, role: "destination" },
+    ],
+    mappings: { source: { local: "shared" }, s: { "001": "shared" } },
+    locationMappings: { source: { warehouse: "main" }, s: { 1: "main" } },
+  };
+  return { store, adapter, calls, group };
+}
+test("unconfirmed Shoptet writes remain held on recovery instead of being resent", async (t) => {
+  const { runGroup } = require("../dist/src/sync/runner.js");
+  const { store, calls, group } = await writeGroupFixture(t, () => {
+    throw Error("Connection lost; outcome unknown");
+  });
+  assert.equal((await runGroup(group, store)).errors.length, 1);
+  store.db
+    .prepare(
+      "UPDATE outbox SET next_attempt_at=NULL,created_at='2000-01-01T00:00:00Z'",
+    )
+    .run();
+  await runGroup(group, store);
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
+  assert.equal(
+    store.db.prepare("SELECT state FROM outbox").get().state,
+    "blocked",
+  );
+});
+test("Shoptet write throttling preserves its job while another destination succeeds independently", async (t) => {
+  const { runGroup } = require("../dist/src/sync/runner.js");
+  const { store, calls, group } = await writeGroupFixture(
+    t,
+    () =>
+      new Response("do-not-log-private-token", {
+        status: 429,
+        headers: { "Retry-After": "2" },
+      }),
+  );
+  let otherQuantity = 0;
+  const other = {
+    id: "other",
+    platform: "shopify",
+    capabilities: {
+      read: true,
+      write: true,
+      locations: true,
+      webhooks: false,
+      compareAndSwap: true,
+    },
+    read: async () => [
+      {
+        productKey: "remote",
+        sku: "001",
+        location: "other-stock",
+        available: otherQuantity,
+        onHand: null,
+        revision: String(otherQuantity),
+        observedAt: new Date().toISOString(),
+      },
+    ],
+    write: async (updates) => {
+      otherQuantity = updates[0].quantity;
+    },
+  };
+  group.members.push({ adapter: other, role: "destination" });
+  group.mappings.other = { remote: "shared" };
+  group.locationMappings.other = { "other-stock": "main" };
+  const result = await runGroup(group, store);
+  assert.equal(result.errors.length, 1);
+  assert.equal(otherQuantity, 7);
+  const pending = store.db
+    .prepare("SELECT * FROM outbox WHERE destination='s'")
+    .get();
+  assert.equal(pending.state, "pending");
+  assert.ok(pending.next_attempt_at > Date.now());
+  assert.doesNotMatch(
+    JSON.stringify(result) + JSON.stringify(pending),
+    /do-not-log-private-token/,
+  );
+  assert.equal(calls.filter((c) => c.init.method === "PATCH").length, 1);
 });

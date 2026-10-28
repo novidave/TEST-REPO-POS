@@ -207,7 +207,9 @@ test("Shoptet and POS forms accurately explain setup requirements", async ({
     await expect(page.locator("#platform-help")).toContainText(
       platform === "shoptet" ? "API access required" : "Setup required",
     );
-    await expect(page.locator('[name="permission"]')).toBeDisabled();
+    if (platform === "shoptet")
+      await expect(page.locator('[name="permission"]')).toBeEnabled();
+    else await expect(page.locator('[name="permission"]')).toBeDisabled();
   }
 });
 
@@ -658,7 +660,7 @@ test("Shoptet without API access saves preparation and never claims successful a
     "authenticated_read_ok",
   );
 });
-test("Shoptet wizard captures shop binding and encrypted-token input with fixed read permission", async ({
+test("Shoptet wizard captures shop binding and encrypted-token input with read-only default", async ({
   page,
 }) => {
   await open(page);
@@ -671,7 +673,7 @@ test("Shoptet wizard captures shop binding and encrypted-token input with fixed 
   await page.locator("#wizard-shoptet-id").fill("123");
   await page.locator("#wizard-shoptet-access").selectOption("private");
   await page.locator("#wizard-username").fill("synthetic-shoptet-token");
-  await expect(page.locator("#wizard-permission")).toBeDisabled();
+  await expect(page.locator("#wizard-permission")).toBeEnabled();
   await expect(page.locator("#wizard-permission")).toHaveValue("read");
   await expect(page.locator("#wizard-endpoint")).toBeHidden();
   await page.locator("#wizard-next").click();
@@ -686,4 +688,59 @@ test("Shoptet wizard captures shop binding and encrypted-token input with fixed 
   expect(Number(state.connections[0].shoptetEshopId)).toBe(123);
   expect(state.connections[0].shoptetAccess).toBe("private");
   expect(JSON.stringify(state)).not.toContain("synthetic-shoptet-token");
+});
+test("Shoptet advanced form requires deliberate acknowledgement before enabling available-stock updates", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="platform"]').selectOption("shoptet");
+  await page.locator('[name="name"]').fill("Shoptet destination");
+  await page.locator('[name="shoptetEshopId"]').fill("123");
+  await page.locator('[name="token"]').fill("synthetic-write-key");
+  await page.locator('[name="permission"]').selectOption("read_write");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#notice")).toContainText("Acknowledge");
+  expect(
+    (await page.evaluate(() => window.desktop.snapshot())).connections,
+  ).toHaveLength(0);
+  await page.locator('[name="shoptetWriteAcknowledged"]').check();
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].permission).toBe("read_write");
+  expect(state.connections[0].shoptetWriteAcknowledged).toBe(true);
+  expect(JSON.stringify(state)).not.toContain("synthetic-write-key");
+});
+test("Shoptet wizard enables master write setup only after quantity/concurrency acknowledgement", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="cloud_api"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-provider").selectOption("Shoptet");
+  await page.locator("#wizard-name").fill("Shoptet write destination");
+  await page.locator("#wizard-shoptet-id").fill("123");
+  await page.locator("#wizard-username").fill("synthetic-key");
+  await page.locator("#wizard-permission").selectOption("read_write");
+  await page.locator("#wizard-next").click();
+  await expect(page.locator("#wizard-notice")).toContainText("Acknowledge");
+  await page.locator("#wizard-shoptet-write").check();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "authenticated_read_ok",
+  );
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].shoptetWriteAcknowledged).toBe(true);
+  expect(state.connections[0].permission).toBe("read_write");
+  await expect(page.locator("#wizard-username")).toHaveValue("");
 });
