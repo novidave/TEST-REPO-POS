@@ -7,7 +7,7 @@ export class ShopifyAdapter implements InventoryAdapter {
   async read():Promise<Stock[]> {
     const rows:Stock[]=[];let cursor:string|null=null;
     do { const data=await this.gql(`query($after:String){inventoryItems(first:100,after:$after){pageInfo{hasNextPage endCursor}edges{node{id sku inventoryLevels(first:100){edges{node{location{id} quantities(names:["available"]){name quantity}}}}}}}}`,{after:cursor});
-      const items=data.inventoryItems;for(const edge of items.edges){const item=edge.node;for(const level of item.inventoryLevels.edges){const n=level.node;const q=n.quantities.find((v:any)=>v.name==="available")?.quantity;if(Number.isFinite(q))rows.push({productKey:item.id,sku:item.sku||"",location:n.location.id,onHand:null,available:q,observedAt:new Date().toISOString()});}}
+      const items=data.inventoryItems;for(const edge of items.edges){const item=edge.node;for(const level of item.inventoryLevels.edges){const n=level.node;const q=n.quantities.find((v:any)=>v.name==="available")?.quantity;if(Number.isFinite(q))rows.push({productKey:item.id,sku:item.sku||"",location:n.location.id,onHand:null,available:q,revision:String(q),observedAt:new Date().toISOString()});}}
       cursor=items.pageInfo.hasNextPage?items.pageInfo.endCursor:null;
     }while(cursor);
     return rows;
