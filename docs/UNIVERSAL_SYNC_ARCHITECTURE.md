@@ -15,7 +15,7 @@ The desktop saves group/connection configuration in SQLite, encrypts credentials
 - File input: explicit CSV/XML handover schema and existing JSON observations. File output: `stock.csv` plus checksum manifest, only with complete catalogue metadata. Duplicate SKU warehouses are not automatically aggregated.
 - WooCommerce: master-only reads/writes; lacks CAS and can race concurrent edits even with preflight checks. No sales-ledger semantics or verified catalogue currency.
 - Shopify: inventory item and warehouse pagination, compareQuantity writes. Quantity-based CAS protects a single update, but polling can miss intervening transactions or ABA changes. No live-store certification is claimed.
-- Shoptet and POS: accurate setup-required states. No speculative vendor endpoints/drivers.
+- Shoptet and POS: accurate setup-required states. The six-method setup wizard stores vendor references and encrypted credentials but performs no speculative local API request, command execution, GUI clicks or hardware/database access. XLSX/DBF and folder watching remain setup-required. Supported file previews use a narrow IPC operation before a connection is persisted; mapping templates are validated and reused by the explicit group editor.
 - CACADUU: optional Phase A, independent of local synchronization. Pinned contract unchanged. B/C off by default, 501 gracefully unavailable, no implemented inventory-upload/command-execution workflow.
 
 ## Remaining release gates

@@ -20,6 +20,18 @@ export interface DesktopConnection {
   stockPath?: string;
   permission: "read" | "read_write";
   status: string;
+  integrationKind?:
+    | "cloud_api"
+    | "local_api"
+    | "file"
+    | "command_line"
+    | "gui_automation"
+    | "hardware_database";
+  vendor?: string;
+  setupEndpoint?: string;
+  setupPath?: string;
+  productMappings?: Record<string, string>;
+  warehouseMappings?: Record<string, string>;
 }
 const text = (value: unknown, label: string, max = 200): string => {
   if (
@@ -177,6 +189,71 @@ export class DesktopService {
       throw new UserError(
         "Create a new connection to change the store endpoint; existing credentials and jobs stay with the original store",
       );
+    const kind = value.integrationKind ?? previous?.integrationKind;
+    if (kind !== undefined) {
+      if (
+        typeof kind !== "string" ||
+        ![
+          "cloud_api",
+          "local_api",
+          "file",
+          "command_line",
+          "gui_automation",
+          "hardware_database",
+        ].includes(kind)
+      )
+        throw new UserError("Invalid integration type");
+      if (
+        (platform === "file" && kind !== "file") ||
+        (["woocommerce", "shopify", "cacaduu"].includes(platform) &&
+          kind !== "cloud_api") ||
+        (platform === "shoptet" && kind !== "cloud_api")
+      )
+        throw new UserError("Integration type does not match platform");
+      c.integrationKind = kind as DesktopConnection["integrationKind"];
+    }
+    const vendor = value.vendor ?? previous?.vendor;
+    if (vendor) c.vendor = text(vendor, "Vendor", 100);
+    const endpoint = value.setupEndpoint ?? previous?.setupEndpoint;
+    if (endpoint) {
+      const url = new URL(text(endpoint, "Endpoint", 2000));
+      if (
+        platform !== "pos" ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        (url.protocol !== "https:" &&
+          !(
+            url.protocol === "http:" &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+          ))
+      )
+        throw new UserError(
+          "Setup endpoint requires HTTPS or loopback HTTP, without embedded credentials",
+        );
+      c.setupEndpoint = url.toString();
+      if (previous?.setupEndpoint && previous.setupEndpoint !== c.setupEndpoint)
+        throw new UserError(
+          "Create a new connection to change the setup endpoint",
+        );
+    }
+    const setupPath = value.setupPath ?? previous?.setupPath;
+    if (setupPath) c.setupPath = text(setupPath, "Setup path", 4096);
+    for (const field of ["productMappings", "warehouseMappings"] as const) {
+      const mapping = value[field] ?? previous?.[field];
+      if (mapping !== undefined) {
+        if (!mapping || typeof mapping !== "object" || Array.isArray(mapping))
+          throw new UserError("Mapping must contain explicit ID pairs");
+        const entries = Object.entries(mapping).map(([key, value]) => [
+          text(key, "Local ID"),
+          text(value, "Mapped ID"),
+        ]);
+        if (new Set(entries.map((entry) => entry[1])).size !== entries.length)
+          throw new UserError("Mappings must be one-to-one");
+        c[field] = Object.fromEntries(entries);
+      }
+    }
     const affected = this.groups().filter((g) =>
       g.members.some((m) => m.connectionId === id),
     );
@@ -201,9 +278,14 @@ export class DesktopService {
     // Never persist arbitrary renderer properties, tokens, or passwords with public config.
     const token = typeof value.token === "string" ? value.token : "";
     const secret = typeof value.secret === "string" ? value.secret : "";
-    if (token || secret) {
+    const username = typeof value.username === "string" ? value.username : "";
+    const password = typeof value.password === "string" ? value.password : "";
+    if (token || secret || username || password) {
       const existing = await this.vault.get(id);
       await this.vault.set(id, {
+        ...existing,
+        ...(username ? { username } : {}),
+        ...(password ? { password } : {}),
         token: token || existing.token || "",
         secret: secret || existing.secret || "",
       });
@@ -577,6 +659,26 @@ export class DesktopService {
     );
     this.log("local_export_completed", { id, count: rows.length });
     return { state: "ok", count: rows.length };
+  }
+  previewFile(path: unknown) {
+    return this.track(async () => {
+      const rows = await new FileInventoryAdapter(
+        "preview",
+        text(path, "File path", 4096),
+      ).read();
+      validateStock(rows);
+      return {
+        count: rows.length,
+        rows: rows
+          .slice(0, 1000)
+          .map(({ productKey, sku, location, available, onHand }) => ({
+            productKey,
+            sku,
+            location,
+            quantity: available ?? onHand,
+          })),
+      };
+    });
   }
   inspect(id: string) {
     return this.track(() => this.inspectNow(id));

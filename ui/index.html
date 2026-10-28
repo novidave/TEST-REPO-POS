@@ -19,7 +19,7 @@
       <nav aria-label="Main navigation">
         <button data-page="overview" class="active">
           ◈ <span>Overview</span></button
-        ><button data-page="connections">⇄ <span>Connections</span></button
+        ><button data-page="connections">⇄ <span>POS Connections</span></button
         ><button data-page="groups">▦ <span>Connection Groups</span></button
         ><button data-page="sync">⟳ <span>Inventory Sync</span></button
         ><button data-page="mapping">≡ <span>Products & Mapping</span></button
@@ -87,16 +87,81 @@
         </div>
       </section>
       <section id="connections" class="view" hidden>
-        <div class="section-heading">
+        <div class="section-heading pos-heading">
           <div>
-            <h2>Your connections</h2>
+            <h2 class="sr-only">POS Connections</h2>
             <p class="muted">
-              Tests only read inventory. They never change merchant stock.
+              Connect your point of sale or inventory system. Choose the method
+              your software supports.
             </p>
           </div>
-          <button id="new-connection">+ Add connection</button>
+          <div class="actions">
+            <button id="new-pos-connection">＋ Add POS Connection</button
+            ><button id="new-connection" class="secondary">
+              + Add connection
+            </button>
+          </div>
         </div>
-        <div id="connection-list" class="card-grid"></div>
+        <div
+          id="integration-types"
+          class="integration-types"
+          aria-label="Integration methods"
+        ></div>
+        <div class="panel connection-panel">
+          <div class="connection-toolbar">
+            <h2>Your POS Connections</h2>
+            <label class="sr-only" for="connection-type-filter"
+              >Filter integration type</label
+            ><select id="connection-type-filter">
+              <option value="all">All types</option>
+              <option value="cloud_api">Cloud API</option>
+              <option value="local_api">Local API / XML</option>
+              <option value="file">File / Folder</option>
+              <option value="command_line">Command-line</option>
+              <option value="gui_automation">GUI Automation</option>
+              <option value="hardware_database">
+                Hardware / Database
+              </option></select
+            ><label class="sr-only" for="connection-search"
+              >Search connections</label
+            ><input
+              id="connection-search"
+              type="search"
+              placeholder="⌕  Search connections…"
+            />
+          </div>
+          <div id="connection-list" class="connection-rows"></div>
+        </div>
+        <details class="integration-help" open>
+          <summary>Which integration method should I choose?</summary>
+          <div id="integration-guides" class="integration-guides"></div>
+          <div class="automation-note">
+            <div>
+              <h3>
+                Is GUI automation a good option if the cash register is
+                connected?
+              </h3>
+              <p>
+                Connect to the inventory software directly through its API or a
+                verified file export whenever possible. GUI automation is a
+                fallback and is not implemented in this app.
+              </p>
+            </div>
+            <div>
+              <strong>Consider it only when</strong>
+              <p>
+                A supported export cannot be obtained through an API or
+                command-line tool, and automation would not interrupt the
+                cashier.
+              </p>
+              <strong>Prefer another method when</strong>
+              <p>
+                The device stores sales rather than full stock, the PC is often
+                locked, or frequent interface changes make clicks unreliable.
+              </p>
+            </div>
+          </div>
+        </details>
         <form id="connection-form" class="panel" hidden>
           <h2 id="connection-heading">Add connection</h2>
           <input name="id" type="hidden" />
@@ -335,6 +400,156 @@
         </div>
       </section>
     </main>
+    <dialog
+      id="pos-wizard"
+      class="pos-wizard"
+      aria-labelledby="pos-wizard-title"
+    >
+      <div class="wizard-header">
+        <div>
+          <div class="eyebrow">NEW INVENTORY CONNECTION</div>
+          <h2 id="pos-wizard-title">Add New POS Connection</h2>
+        </div>
+        <button
+          id="wizard-close"
+          class="icon-button secondary"
+          aria-label="Close setup wizard"
+        >
+          ×
+        </button>
+      </div>
+      <ol class="wizard-steps" aria-label="Setup progress">
+        <li data-step="1">Select Type</li>
+        <li data-step="2">Configure</li>
+        <li data-step="3">Map Products</li>
+        <li data-step="4">Test &amp; Save</li>
+      </ol>
+      <div id="wizard-notice" role="status" aria-live="polite" hidden></div>
+      <section class="wizard-page" data-wizard-step="1">
+        <h3>1. Select Integration Type</h3>
+        <p class="muted">
+          Start with an API or a verified export from the system that holds your
+          stock.
+        </p>
+        <div id="wizard-types" class="wizard-types"></div>
+      </section>
+      <section class="wizard-page" data-wizard-step="2" hidden>
+        <h3>2. Configure Connection</h3>
+        <div id="wizard-config-help" class="hint"></div>
+        <form id="wizard-config-form">
+          <label
+            >Connection name<input
+              id="wizard-name"
+              required
+              maxlength="200"
+              placeholder="e.g. Main shop inventory" /></label
+          ><label id="wizard-provider-field"
+            >Software / provider<select id="wizard-provider"></select></label
+          ><label id="wizard-format-field" hidden
+            >File format<select id="wizard-format">
+              <option value="supported">CSV / XML / JSON</option>
+              <option value="legacy">XLSX / DBF — setup required</option>
+            </select></label
+          ><label id="wizard-endpoint-field" hidden
+            >API endpoint<input
+              id="wizard-endpoint"
+              placeholder="http://localhost:444/xml"
+              autocomplete="off" /></label
+          ><label id="wizard-domain-field" hidden
+            >Shopify domain<input
+              id="wizard-domain"
+              placeholder="shop.myshopify.com"
+              autocomplete="off" /></label
+          ><label id="wizard-file-field" hidden
+            >File or export path<input
+              id="wizard-file"
+              placeholder="C:\Inventory\stock.csv"
+            /><button id="wizard-choose-file" type="button" class="secondary">
+              Choose file
+            </button></label
+          ><label id="wizard-setup-path-field" hidden
+            >Application / device reference<input
+              id="wizard-setup-path"
+              placeholder="Optional setup reference; nothing will be executed"
+          /></label>
+          <div class="form-grid">
+            <label id="wizard-username-field" hidden
+              >Username / API key<input
+                id="wizard-username"
+                type="password"
+                autocomplete="new-password" /></label
+            ><label id="wizard-password-field" hidden
+              >Password / API secret<input
+                id="wizard-password"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+          </div>
+          <label id="wizard-permission-field" hidden
+            >Permission<select id="wizard-permission">
+              <option value="read">Read only</option>
+              <option value="read_write">
+                Read &amp; write — explicit consent
+              </option>
+            </select></label
+          >
+        </form>
+        <p class="hint">
+          Credentials are encrypted using OS secure storage. Setup-required
+          methods never run commands, automate clicks, contact a POS device, or
+          execute database queries.
+        </p>
+      </section>
+      <section class="wizard-page" data-wizard-step="3" hidden>
+        <h3>3. Map Products &amp; Warehouses</h3>
+        <p class="muted">
+          Save explicit mapping templates, then assign this connection to a
+          group. This step does not enable synchronization.
+        </p>
+        <button id="wizard-preview" class="secondary">
+          Read sample inventory
+        </button>
+        <div id="wizard-inventory"></div>
+        <div class="form-grid">
+          <label
+            >Product IDs → shared product IDs<textarea
+              id="wizard-product-mappings"
+              placeholder="local-product = shared-product"
+            ></textarea></label
+          ><label
+            >Warehouse IDs → shared warehouse IDs<textarea
+              id="wizard-warehouse-mappings"
+              placeholder="local-warehouse = shared-warehouse"
+            ></textarea>
+          </label>
+        </div>
+        <p class="hint">
+          One pair per line: local ID = shared ID. No product names, quantities,
+          prices or currencies are filled in. Templates remain editable in
+          Connection Groups.
+        </p>
+      </section>
+      <section class="wizard-page" data-wizard-step="4" hidden>
+        <h3>4. Test &amp; Save</h3>
+        <div id="wizard-review" class="wizard-review"></div>
+        <p class="hint">
+          Supported tests read inventory only. A successful read does not verify
+          write access. Unsupported drivers are saved as setup required.
+        </p>
+        <button id="wizard-test" class="secondary">Test Connection</button>
+        <div
+          id="wizard-test-result"
+          class="wizard-test-result"
+          role="status"
+        ></div>
+      </section>
+      <footer class="wizard-footer">
+        <button id="wizard-back" class="secondary">Back</button
+        ><span id="wizard-step-label">Step 1 of 4</span
+        ><button id="wizard-next">Continue →</button
+        ><button id="wizard-save" hidden>Save connection</button>
+      </footer>
+    </dialog>
     <script src="./ui.js"></script>
   </body>
 </html>

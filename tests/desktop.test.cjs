@@ -425,3 +425,89 @@ test("mapping/source identity changes clear stale baselines while interval chang
   await service.saveConnection({ ...a, stockPath: "other-source.csv" });
   assert.equal(service.store.previous(g.id, "a", "p\0w"), undefined);
 });
+test("POS setup metadata persists but usernames and passwords remain encrypted and untested", async (t) => {
+  const { service, dir } = await fixture(t);
+  const saved = await service.saveConnection({
+    id: "pohoda",
+    name: "POHODA main shop",
+    platform: "pos",
+    permission: "read",
+    integrationKind: "local_api",
+    vendor: "POHODA (mServer)",
+    setupEndpoint: "http://localhost:444/xml",
+    username: "setup-user-private",
+    password: "setup-password-private",
+    productMappings: { P1: "shared-P1" },
+    warehouseMappings: { main: "shared-main" },
+  });
+  assert.equal(saved.status, "setup_required");
+  assert.equal(saved.integrationKind, "local_api");
+  assert.equal(saved.setupEndpoint, "http://localhost:444/xml");
+  assert.equal(
+    (await service.testConnection(saved.id)).state,
+    "setup_required",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(service.snapshot()),
+    /setup-user-private|setup-password-private/,
+  );
+  assert.doesNotMatch(
+    await readFile(join(dir, "credentials"), "utf8"),
+    /setup-user-private|setup-password-private/,
+  );
+  await service.saveConnection({
+    id: saved.id,
+    name: "Renamed shop",
+    platform: "pos",
+    permission: "read",
+  });
+  assert.deepEqual(service.connections()[0].productMappings, {
+    P1: "shared-P1",
+  });
+});
+test("POS setup does not accept embedded passwords, remote plain HTTP, or incompatible integration types", async (t) => {
+  const { service } = await fixture(t);
+  const input = {
+    name: "POS",
+    platform: "pos",
+    permission: "read",
+    integrationKind: "local_api",
+  };
+  for (const setupEndpoint of [
+    "http://remote.example/xml",
+    "https://user:password@example.test",
+    "http://localhost:444/xml?password=secret",
+  ])
+    await assert.rejects(service.saveConnection({ ...input, setupEndpoint }));
+  await assert.rejects(
+    service.saveConnection({ ...input, integrationKind: "unknown" }),
+    /integration/,
+  );
+  await assert.rejects(
+    service.saveConnection({
+      name: "File",
+      platform: "file",
+      stockPath: "x.csv",
+      permission: "read",
+      integrationKind: "gui_automation",
+    }),
+    /match/,
+  );
+});
+test("file preview reads real data without persisting a connection and refuses incomplete inventory", async (t) => {
+  const { service, dir } = await fixture(t);
+  const path = join(dir, "preview.csv");
+  await writeFile(
+    path,
+    "source_code,name,price,currency,quantity,warehouse,observed_at\nS1,Fixture,10,EUR,2,main,2026-10-28T12:00:00Z\n",
+  );
+  const preview = await service.previewFile(path);
+  assert.equal(preview.count, 1);
+  assert.equal(preview.rows[0].productKey, "S1");
+  assert.equal(service.connections().length, 0);
+  await writeFile(
+    path,
+    "source_code,name,price,currency,quantity,warehouse,observed_at\nS1,Fixture,,EUR,2,main,2026-10-28T12:00:00Z\n",
+  );
+  await assert.rejects(service.previewFile(path));
+});

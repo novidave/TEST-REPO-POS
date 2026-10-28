@@ -30,7 +30,7 @@ Keep the entire output folder together. Native `.node` files are unpacked from A
 ## Use the dashboard
 
 - **Overview:** connection/group counts and recent activity.
-- **Connections:** CSV/XML/JSON, WooCommerce, Shopify, Shoptet, Local POS, optional Cloud; add/edit forms, explicit read/read-write permission, read-only connection tests and authentication/error state. Tests never write inventory.
+- **POS Connections:** six integration-method cards (Cloud API, Local API/XML, File/Folder, Command-line, GUI Automation, Hardware/Database), searchable/filterable connection rows, and a four-step setup drawer: select type, configure, map products, test/save. CSV/XML/JSON and existing WooCommerce/Shopify adapters use real read tests; other vendor methods show setup-required status. Product and warehouse mapping templates are carried into the group editor. An unsaved file can be previewed without creating a connection. Username/password fields use encrypted credential storage and clear on save/cancel. The advanced connection form remains available. Tests never write inventory.
 - **Connection Groups:** master source or guarded two-way, explicit product and warehouse maps, per-member roles, intervals, enable/pause and manual Sync Now. The master must have source role. Map every observed item/warehouse: `local ID = shared ID` per line.
 - **Inventory Sync:** per-group Sync Now and persistent queue. Sync Now asks for confirmation because configured destinations may change. Schedules run while the app is open and resume after restart; there is no background Windows service. Pause/Resume works without editing the group, including when retry jobs are outstanding. Pausing retains jobs and prevents subsequent writes; a request already sent may finish.
 - **Products & Mapping:** inspect exact product/SKU/warehouse IDs (first 1,000 observations displayed), then edit group mappings.
@@ -67,7 +67,7 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 | WooCommerce | Stock-managed product/variant reads, pagination, absolute quantity writes | Master only; no atomic revision check; no verified catalogue currency for export; sandbox/live validation remains |
 | Shopify | Paginated items and warehouses, `available` quantities, atomic `compareQuantity` writes | Admin API scopes required; API version 2026-07; sandbox/live validation remains; catalogue export metadata unavailable |
 | Shoptet | Setup-required forms/status | Merchant API/add-on authorization and verified endpoints not implemented |
-| Local POS | Setup-required form; existing injectable driver interface retained | No vendor drivers bundled; use a verified file export |
+| Local POS | Categorized setup wizard, encrypted setup credentials, explicit mapping templates; existing injectable driver interface retained | No POHODA/MRP/Elcom/Square/Lightspeed vendor drivers bundled; local API, CLI, GUI automation and hardware/database references are inert setup metadata. XLSX/DBF parsing and folder watching are not implemented; use verified CSV/XML/JSON files |
 | CACADUU | Phase A client + desktop controls, timed heartbeat | Optional; B/C contract wrappers feature-gated, no inventory upload/command execution workflow |
 
 ## Cloud compatibility

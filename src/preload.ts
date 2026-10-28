@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 const desktop = {
+  previewFile: (path: string) =>
+    ipcRenderer.invoke("desktop:preview-file", path),
   setGroupEnabled: (id: string, enabled: boolean) =>
     ipcRenderer.invoke("desktop:set-group-enabled", id, enabled),
   dismissJob: (id: string) => ipcRenderer.invoke("desktop:dismiss-job", id),

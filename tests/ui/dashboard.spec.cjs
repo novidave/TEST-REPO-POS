@@ -14,12 +14,20 @@ async function open(page) {
       saveConnection: async (v) => {
         data.connections.push({
           id: "connection-" + (data.connections.length + 1),
+          ...Object.fromEntries(
+            Object.entries(v).filter(
+              ([key]) =>
+                !["id", "token", "secret", "username", "password"].includes(
+                  key,
+                ),
+            ),
+          ),
           name: v.name,
           platform: v.platform,
           permission: v.permission,
           status: "not_tested",
         });
-        return {};
+        return structuredClone(data.connections.at(-1));
       },
       testConnection: async () => ({
         state: "authenticated_read_ok",
@@ -33,6 +41,12 @@ async function open(page) {
         data.groups.push(v);
         return v;
       },
+      previewFile: async () => ({
+        count: 1,
+        rows: [
+          { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
+        ],
+      }),
       inspect: async () => [
         { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
       ],
@@ -205,4 +219,137 @@ test("group mappings, roles, schedule and manual sync flow", async ({
     .getByRole("button", { name: "Sync Now" })
     .click();
   await expect(page.locator("#notice")).toContainText('"state": "ok"');
+});
+test("POS wizard previews files, stores mapping templates and saves a supported file connection", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await expect(
+    page.locator("#integration-types .integration-tile"),
+  ).toHaveCount(6);
+  await page.locator("#new-pos-connection").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.locator('#wizard-types [data-integration="file"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-name").fill("POS export");
+  await page.locator("#wizard-file").fill("fixture.csv");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-preview").click();
+  await expect(page.locator("#wizard-inventory")).toContainText("SKU-A");
+  await page
+    .locator("#wizard-product-mappings")
+    .fill("SKU-A = canonical-product");
+  await page
+    .locator("#wizard-warehouse-mappings")
+    .fill("main = shared-warehouse");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "File read validated",
+  );
+  await page.locator("#wizard-save").click();
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].productMappings).toEqual({
+    "SKU-A": "canonical-product",
+  });
+  await expect(page.locator("#connection-list")).toContainText("POS export");
+  await page.locator('[data-page="groups"]').click();
+  await page.locator("#new-group").click();
+  await expect(page.locator(".product-map").first()).toHaveValue(
+    "SKU-A = canonical-product",
+  );
+});
+test("local API wizard reports setup required, clears passwords on cancel and never claims authentication", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-name").fill("POHODA");
+  await page.locator("#wizard-endpoint").fill("http://localhost:444/xml");
+  await page.locator("#wizard-username").fill("private-user");
+  await page.locator("#wizard-password").fill("private-password");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "Setup required",
+  );
+  await expect(page.locator("#wizard-test-result")).not.toContainText(
+    "successful",
+  );
+  await expect(page.locator("#wizard-review")).not.toContainText(
+    "private-password",
+  );
+  await page.locator("#wizard-close").click();
+  await expect(page.locator("#wizard-password")).toHaveValue("");
+  await expect(page.locator("#wizard-username")).toHaveValue("");
+});
+test("POS connection type/search filters and unsupported method guidance work", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await expect(
+    page.locator("#integration-guides .integration-guide"),
+  ).toHaveCount(6);
+  await page.locator("#new-connection").click();
+  await page.locator('[name="name"]').fill("Main warehouse");
+  await page.locator('[name="stockPath"]').fill("stock.csv");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await page.locator("#connection-search").fill("unknown");
+  await expect(page.locator("#connection-list")).toContainText(
+    "No connections match",
+  );
+  await page.locator("#connection-search").fill("warehouse");
+  await expect(page.locator("#connection-list")).toContainText(
+    "Main warehouse",
+  );
+  await page
+    .locator("#connection-type-filter")
+    .selectOption("hardware_database");
+  await expect(page.locator("#connection-list")).toContainText(
+    "No connections match",
+  );
+  await page
+    .locator('#integration-types [data-integration="gui_automation"]')
+    .click();
+  await page.locator("#wizard-next").click();
+  await expect(page.locator("#wizard-config-help")).toContainText(
+    "no automated clicks",
+  );
+});
+test("cloud wizard saves once, tests through the bridge, and clears its API credential", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page
+    .locator('#integration-types [data-integration="cloud_api"]')
+    .click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-name").fill("Development Shopify");
+  await page.locator("#wizard-provider").selectOption("Shopify");
+  await page.locator("#wizard-domain").fill("development.myshopify.com");
+  await page.locator("#wizard-username").fill("private-api-fixture");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await expect(page.locator("#wizard-test")).toHaveText(
+    "Save & Test Connection",
+  );
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "authenticated_read_ok",
+  );
+  await expect(page.locator("#wizard-username")).toHaveValue("");
+  await expect(page.locator("#wizard-save")).toHaveText("Done");
+  await page.locator("#wizard-save").click();
+  const data = await page.evaluate(() => window.desktop.snapshot());
+  expect(data.connections.length).toBe(1);
+  expect(JSON.stringify(data)).not.toContain("private-api-fixture");
 });

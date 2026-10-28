@@ -34,12 +34,32 @@ const { join, resolve } = require("node:path");
     const page = await application.firstWindow();
     await page.waitForSelector("#stat-connections");
     await page.locator('[data-page="connections"]').click();
-    await page.locator("#new-connection").click();
-    await page.locator('[name="name"]').fill("Fixture file");
-    await page.locator('[name="stockPath"]').fill(input);
+    await page.locator("#new-pos-connection").click();
+    await page.locator('#wizard-types [data-integration="file"]').click();
+    await page.locator("#wizard-next").click();
+    await page.locator("#wizard-name").fill("Fixture file");
+    await page.locator("#wizard-file").fill(input);
+    await page.locator("#wizard-next").click();
+    await page.locator("#wizard-preview").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#wizard-inventory")
+        .textContent.includes("TEST-1"),
+    );
     await page
-      .getByRole("button", { name: "Save connection", exact: true })
-      .click();
+      .locator("#wizard-product-mappings")
+      .fill("TEST-1 = shared-test-product");
+    await page
+      .locator("#wizard-warehouse-mappings")
+      .fill("test-warehouse = shared-test-warehouse");
+    await page.locator("#wizard-next").click();
+    await page.locator("#wizard-test").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#wizard-test-result")
+        .textContent.includes("File read validated"),
+    );
+    await page.locator("#wizard-save").click();
     await page.locator("#connection-list h3").waitFor();
     await page.getByRole("button", { name: "Test read" }).click();
     await page.waitForFunction(() =>
@@ -54,6 +74,13 @@ const { join, resolve } = require("node:path");
     const state = await page.evaluate(() => window.desktop.snapshot());
     assert.equal(state.connections.length, 1);
     const id = state.connections[0].id;
+    assert.equal(state.connections[0].integrationKind, "file");
+    assert.deepEqual(state.connections[0].productMappings, {
+      "TEST-1": "shared-test-product",
+    });
+    assert.deepEqual(state.connections[0].warehouseMappings, {
+      "test-warehouse": "shared-test-warehouse",
+    });
     const output = join(profile, "exports", id, "stock.csv");
     const before = await readFile(output, "utf8");
     assert.match(before, /Test fixture only/);
@@ -138,7 +165,7 @@ const { join, resolve } = require("node:path");
     assert.equal(restored.connections[0].status, "authenticated_read_ok");
     console.log((packaged ? "Packaged" : "Source") + " profile restart passed");
     console.log(
-      "Electron end-to-end passed: real IPC, file setup, read test, SQLite persistence, local export, invalid-data preservation, sandbox and context isolation",
+      "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, invalid-data preservation, sandbox and context isolation",
     );
   } finally {
     if (application) await application.close();
