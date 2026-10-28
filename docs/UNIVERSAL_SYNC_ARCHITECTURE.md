@@ -1,26 +1,25 @@
-# Standalone universal inventory synchronization — implementation status
+# Standalone synchronization architecture
 
-## Independence
-TEST-REPO-POS can operate without CACADUU. CACADUU remains an optional destination, using the pinned docs/cloud-api contract. Phase A is separate; B/C are disabled by default and treat 501 not_available as unsupported. Local stock.csv + manifest remains the intended default delivery; current generic adapters do **not** yet provide verified name/price/currency for a safe export, so automatic file delivery from these adapters is intentionally not wired.
+The existing Electron scaffold, pinned cloud client, adapters, exporter, planner and SQLite store are retained. `src/desktop.ts` owns desktop configuration, encrypted credential access, schedules, local export and history. `src/main.ts` owns window lifecycle and restricted IPC; the renderer receives explicit safe operations only. `src/security.ts` provides encrypted vault, atomic JSON writes, HTTPS checks and public error handling.
 
-## Core
-- Explicit product identity mapping per connection; no name-only matching.
-- Master mode: only designated master is authoritative.
-- Two-way mode: first differing observations and simultaneous changes become conflicts; no last-writer-wins guesses.
-- SQLite durable observations, conflicts and outbox.
-- Sequential destination writes; one failing destination does not prevent another.
-- No implicit location mapping; exact location IDs required in this first version.
-- No cloud server required for commerce-to-commerce synchronization while the desktop process is running.
+## Planning and execution
 
-## Adapters
-- WooCommerce: REST product/variation read and absolute quantity write for stock-managed products. No revision CAS; unsafe for concurrent high-volume edits.
-- Shopify: GraphQL inventory items/locations and compareQuantity writes. Pagination of inventory levels beyond first 100 per item remains unimplemented; require validation for large shops.
-- Shoptet: explicit disabled adapter pending verified merchant authorization and API schema. Never invent endpoints.
-- POS: injectable driver interface, no vendor driver included.
-- File: JSON stock observations reader, not yet the handover CSV schema.
+`planGroup` validates complete inventories and explicit product/warehouse identities. Master groups select the configured source; two-way groups require CAS-capable members and compare against the last agreed observation. Conflicting items retain their old baselines. Plan observations and new jobs commit in a single SQLite transaction.
 
-## Safety limitations
-Two-way polling can miss multiple intervening sales; this design deliberately holds ambiguous changes. Do not enable for live shops without testing and a single authoritative ledger or reliable transaction events. Outbox retries are persisted but no backoff, dead-letter, or destination verification is implemented. A destination update can succeed remotely then be retried if the app crashes before marking it complete; APIs without idempotency need reconciliation before production.
+`runGroup` serializes group execution, drains group-scoped durable operations and isolates destinations. Master groups can continue updating healthy destinations while another has held work. Two-way groups reconcile their existing queue before creating another plan. Source/peer changes, destination revision changes and ambiguous retries are held. A write attempt is persisted before network IO. Applied quantities reconcile after a crash; unchanged revisions permit atomic retries, and non-atomic uncertain writes require review. Failures use backoff and a five-attempt limit. Errors are controlled messages; upstream bodies and secrets are not logged.
 
-## Tests and release gates
-Run npm install, npm test, then test with sandbox stores. No live credentials in repo. Verify variant mapping, pagination, write permissions, rate limits, concurrent sales, crash recovery, stale observations, and exported CSV schema. **Not production-ready.**
+The desktop saves group/connection configuration in SQLite, encrypts credentials separately with OS storage, and reinstalls schedules when opened. Processes do not survive app exit. There is no Windows service. Single-instance and per-group guards protect the desktop profile. Do not run a separate CLI process against the same database concurrently.
+
+## Capability boundaries
+
+- File input: explicit CSV/XML handover schema and existing JSON observations. File output: `stock.csv` plus checksum manifest, only with complete catalogue metadata. Duplicate SKU warehouses are not automatically aggregated.
+- WooCommerce: master-only reads/writes; lacks CAS and can race concurrent edits even with preflight checks. No sales-ledger semantics or verified catalogue currency.
+- Shopify: inventory item and warehouse pagination, compareQuantity writes. Quantity-based CAS protects a single update, but polling can miss intervening transactions or ABA changes. No live-store certification is claimed.
+- Shoptet and POS: accurate setup-required states. No speculative vendor endpoints/drivers.
+- CACADUU: optional Phase A, independent of local synchronization. Pinned contract unchanged. B/C off by default, 501 gracefully unavailable, no implemented inventory-upload/command-execution workflow.
+
+## Remaining release gates
+
+Run Windows CI and manually validate Windows credentials, startup, packaging and a development-store workflow. OS encryption cannot be validated with a mocked cipher. Portable packaging is unsigned; signing and installers remain separate work. No real merchant writes were used in automated validation.
+
+Outbox storage is durable but not a distributed transaction with merchant APIs. Two-way polling is not a substitute for a reliable transaction ledger. File-pair replacement is not cross-file atomic; consumers must verify manifest hashes. SQLite history is retained without automatic pruning; the UI displays the most recent 100 records and inspector first 1,000 rows.

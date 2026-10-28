@@ -1,30 +1,186 @@
-import type { InventoryAdapter, SyncGroup } from "./types";
-import { planGroup } from "./engine";
+import type { SyncGroup } from "./types";
+import { planGroup, validateStock } from "./engine";
 import { SqliteSyncStore } from "./store";
+const active = new Set<string>();
 export async function runGroup(group: SyncGroup, store: SqliteSyncStore) {
-  const plan = await planGroup(group,store);
-  // Each destination is isolated; failures stay in the durable outbox.
-  const errors: { destination:string; error:string }[] = [];
-  for (const member of group.members) {
-    const adapter: InventoryAdapter = member.adapter;
-    if (!adapter.write || !adapter.capabilities.write) continue;
-    const pending = store.pending(adapter.id);
-    for (const row of pending) {
-      try { await adapter.write([{ productKey:row.product_key,location:row.location,quantity:row.quantity,expectedRevision:row.expected_revision??undefined,operationId:row.id }]); store.done(row.id); }
-      catch (e) { const message = e instanceof Error ? e.message : "Write failed"; store.failed(row.id,message); errors.push({destination:adapter.id,error:message}); }
+  if (active.has(group.id)) throw new Error("Group sync is already running");
+  active.add(group.id);
+  try {
+    if (!group.enabled)
+      return {
+        plan: { groupId: group.id, writes: [], conflicts: [], sourceCount: 0 },
+        errors: [],
+      };
+    // Pending/blocked operations are reconciled before making a new plan.
+    const plan =
+      group.mode === "two_way" && store.hasOutstanding(group.id)
+        ? { groupId: group.id, writes: [], conflicts: [], sourceCount: 0 }
+        : await planGroup(group, store);
+    const errors: { destination: string; error: string }[] = [
+      ...(plan.destinationErrors ?? []),
+    ];
+    for (const member of group.members) {
+      const adapter = member.adapter;
+      if (
+        member.role === "source" ||
+        !adapter.write ||
+        !adapter.capabilities.write
+      )
+        continue;
+      for (const row of store.pending(group.id, adapter.id)) {
+        let attempted = false;
+        try {
+          if (group.mode === "master") {
+            const canonical = group.mappings[adapter.id]?.[row.product_key],
+              warehouse = group.locationMappings?.[adapter.id]?.[row.location];
+            const source = group.members.find(
+              (m) => m.adapter.id === group.masterId,
+            )!.adapter;
+            const sourceRows = await source.read();
+            validateStock(sourceRows);
+            const sourceItem = sourceRows.find(
+              (s) =>
+                group.mappings[source.id]?.[s.productKey] === canonical &&
+                group.locationMappings?.[source.id]?.[s.location] === warehouse,
+            );
+            if (
+              !sourceItem ||
+              (sourceItem.available ?? sourceItem.onHand) !== row.quantity
+            ) {
+              store.block(
+                row.id,
+                "Master changed since job creation; reconcile before replanning",
+              );
+              continue;
+            }
+          }
+          if (group.mode === "two_way") {
+            const canonical = group.mappings[adapter.id]?.[row.product_key],
+              warehouse = group.locationMappings?.[adapter.id]?.[row.location];
+            let changed = false;
+            for (const peer of group.members.filter(
+              (m) => m.adapter.id !== adapter.id,
+            )) {
+              const observations = await peer.adapter.read();
+              validateStock(observations);
+              const observation = observations.find(
+                (s) =>
+                  group.mappings[peer.adapter.id]?.[s.productKey] ===
+                    canonical &&
+                  group.locationMappings?.[peer.adapter.id]?.[s.location] ===
+                    warehouse,
+              );
+              const baseline = observation
+                ? store.previous(
+                    group.id,
+                    peer.adapter.id,
+                    observation.productKey + "\0" + observation.location,
+                  )
+                : undefined;
+              if (
+                !observation ||
+                baseline === undefined ||
+                ((observation.available ?? observation.onHand) !== baseline &&
+                  (observation.available ?? observation.onHand) !==
+                    row.quantity)
+              )
+                changed = true;
+            }
+            if (changed) {
+              store.block(
+                row.id,
+                "Peer changed since plan creation; manual reconciliation required",
+              );
+              continue;
+            }
+          }
+          const fresh = await adapter.read();
+          validateStock(fresh);
+          const current = fresh.find(
+            (s) =>
+              s.productKey === row.product_key && s.location === row.location,
+          );
+          if (!current) {
+            store.block(row.id, "Mapped destination item missing");
+            continue;
+          }
+          const quantity = current.available ?? current.onHand;
+          // Handles duplicate delivery and a crash after remote success, before local commit.
+          if (quantity === row.quantity) {
+            store.done(row.id);
+            continue;
+          }
+          if (
+            (current.revision ?? String(quantity)) !== row.expected_revision
+          ) {
+            store.block(
+              row.id,
+              "Destination changed; manual reconciliation required",
+            );
+            continue;
+          }
+          if (!adapter.capabilities.compareAndSwap && row.attempts > 0) {
+            store.block(
+              row.id,
+              "Uncertain non-atomic write; verify destination before retrying",
+            );
+            continue;
+          }
+          // Persist an attempt BEFORE network IO so a crash cannot look like an unattempted write.
+          store.attempt(row.id);
+          attempted = true;
+          await adapter.write([
+            {
+              productKey: row.product_key,
+              location: row.location,
+              quantity: row.quantity,
+              expectedRevision: row.expected_revision ?? undefined,
+              operationId: row.id,
+            },
+          ]);
+          store.done(row.id);
+        } catch {
+          const message =
+            "Destination request failed; inspect connection and retry queue";
+          if (!attempted) store.attempt(row.id);
+          store.failed(row.id, message);
+          errors.push({ destination: adapter.id, error: message });
+        }
+      }
     }
+    return { plan, errors };
+  } finally {
+    active.delete(group.id);
   }
-  return { plan, errors };
 }
 export class SyncScheduler {
   private timers = new Map<string, ReturnType<typeof setInterval>>();
-  private running = new Set<string>();
   constructor(private readonly store: SqliteSyncStore) {}
-  start(group: SyncGroup, onResult?: (result: Awaited<ReturnType<typeof runGroup>>) => void) {
+  start(
+    group: SyncGroup,
+    onResult?: (result: Awaited<ReturnType<typeof runGroup>>) => void,
+    onError?: () => void,
+  ) {
     this.stop(group.id);
-    const tick = async () => { if(this.running.has(group.id)) return; this.running.add(group.id); try { const result = await runGroup(group,this.store); onResult?.(result); } catch(e) { console.error("Sync group failed:",group.id,e instanceof Error?e.message:"unknown"); } finally { this.running.delete(group.id); } };
-    this.timers.set(group.id,setInterval(tick,Math.max(1,group.intervalMinutes)*60_000));
+    if (!group.enabled) return;
+    const tick = async () => {
+      try {
+        onResult?.(await runGroup(group, this.store));
+      } catch {
+        onError?.();
+      }
+    };
+    this.timers.set(
+      group.id,
+      setInterval(tick, group.intervalMinutes * 60_000),
+    );
   }
-  stop(id: string) { const t=this.timers.get(id); if(t) clearInterval(t); this.timers.delete(id); }
-  stopAll() { for(const id of this.timers.keys()) this.stop(id); }
+  stop(id: string) {
+    const timer = this.timers.get(id);
+    if (timer) clearInterval(timer);
+    this.timers.delete(id);
+  }
+  stopAll() {
+    for (const id of this.timers.keys()) this.stop(id);
+  }
 }

@@ -1,14 +1,77 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile, mkdir } from "node:fs/promises";
+import { resolve, dirname, join } from "node:path";
 import { createAdapters, createGroups, type AgentConfig } from "./config";
 import { SqliteSyncStore } from "./store";
-import { runGroup, SyncScheduler } from "./runner";
-async function main(){const configPath=process.argv[2];if(!configPath)throw new Error("Usage: npm run sync:once -- ./config.json");const config=JSON.parse(await readFile(resolve(configPath),"utf8")) as AgentConfig;
- const adapters=createAdapters(config);const groups=createGroups(config,adapters);const store=new SqliteSyncStore(resolve(config.databasePath));
- const execute=async(group:typeof groups[number])=>{
-   // Default local delivery always runs before optional remote writes. Export only a complete master reading.
-   // Stock-only adapters lack verified name, price and currency. Preserve existing local export module; do not fabricate data.\n   const result=await runGroup(group,store);console.log(JSON.stringify({group:group.id,writes:result.plan.writes.map(x=>({destination:x.destination,count:x.updates.length})),conflicts:result.plan.conflicts.length,errors:result.errors}));
- };
- try{for(const group of groups.filter(g=>g.enabled))await execute(group);if(process.env.CACADUU_RUN_SCHEDULER==="true"){const scheduler=new SyncScheduler(store);for(const group of groups.filter(g=>g.enabled))scheduler.start(group,r=>console.log("Scheduled sync",group.id,r.errors.length));process.on("SIGINT",()=>{scheduler.stopAll();store.close();process.exit(0)});}else store.close();}catch(e){store.close();throw e;}
+import { runGroup } from "./runner";
+import { exportStock, exportRows } from "../export";
+import { validateStock } from "./engine";
+import { publicError } from "../security";
+async function main() {
+  const configPath = process.argv[2];
+  if (!configPath) throw new Error("Configuration file required");
+  const config = JSON.parse(
+    await readFile(resolve(configPath), "utf8"),
+  ) as AgentConfig;
+  const adapters = createAdapters(config),
+    groups = createGroups(config, adapters);
+  await mkdir(dirname(resolve(config.databasePath)), { recursive: true });
+  const store = new SqliteSyncStore(resolve(config.databasePath));
+  try {
+    // File-only usage is useful without a cloud account or a writable destination.
+    for (const c of config.connections.filter((c) => c.platform === "file")) {
+      try {
+        if (!/^[A-Za-z0-9_-]+$/.test(c.id)) throw new Error("Invalid ID");
+        const rows = await adapters.get(c.id)!.read();
+        validateStock(rows);
+        if (rows.some((r) => !r.product))
+          throw new Error("Verified catalogue metadata missing");
+        await exportStock(
+          join(resolve(config.exportDirectory), c.id),
+          exportRows(rows),
+          c.id,
+        );
+        console.log(
+          JSON.stringify({
+            connection: c.id,
+            export: "ok",
+            count: rows.length,
+          }),
+        );
+      } catch {
+        console.error(
+          "Local export validation failed; previous files preserved",
+        );
+        process.exitCode = 1;
+      }
+    }
+    for (const group of groups.filter((g) => g.enabled)) {
+      try {
+        const result = await runGroup(group, store);
+        console.log(
+          JSON.stringify({
+            group: group.id,
+            writes: result.plan.writes.map((x) => ({
+              destination: x.destination,
+              count: x.updates.length,
+            })),
+            conflicts: result.plan.conflicts.length,
+            errors: result.errors,
+          }),
+        );
+        if (result.errors.length || result.plan.conflicts.length)
+          process.exitCode = 1;
+      } catch {
+        console.error(
+          "Group synchronization failed; verify configuration and inventory",
+        );
+        process.exitCode = 1;
+      }
+    }
+  } finally {
+    store.close();
+  }
 }
-main().catch(e=>{console.error(e instanceof Error?e.message:"Sync failed");process.exitCode=1});
+main().catch((e) => {
+  console.error(publicError(e));
+  process.exitCode = 1;
+});

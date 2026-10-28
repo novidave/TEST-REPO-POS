@@ -1,6 +1,12 @@
 node_modules/
 dist/
-*.log
+release/
+playwright-report/
+test-results/
+*.db
+*.db-shm
+*.db-wal
 .env
+*.log
 .env.*
 !*.example

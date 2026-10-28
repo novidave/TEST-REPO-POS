@@ -1,1 +1,340 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CACADUU POS Sync Agent</title><style>body{font:15px system-ui;margin:0;background:#f5f7fb;color:#142238}aside{position:fixed;inset:0 auto 0 0;width:220px;background:#111d34;color:white;padding:28px}main{margin-left:276px;padding:40px;max-width:800px}.panel{background:white;padding:25px;border:1px solid #e1e6ef;border-radius:14px;margin:18px 0}input,button{font:inherit;padding:12px;border-radius:8px;border:1px solid #ccd5e0;margin:5px}input{width:90%;max-width:460px}button{background:#1468ed;color:white;border:0;cursor:pointer}button:disabled{opacity:.5}small{color:#66758a}#result{white-space:pre-wrap}</style></head><body><aside><h2>CACADUU</h2><p>POS Sync Agent</p><hr><p>Overview</p><p>POS Connections</p><p>Inventory Sync</p><p>Products & Mapping</p><p>Logs</p><p>Settings</p></aside><main><h1>CACADUU Cloud Connection</h1><p>Optional destination. Local stock.csv + manifest remain the default delivery.</p><div class="panel"><h3>Pair with Môj obchod</h3><small>Paste the HTTPS Supabase connector function base URL</small><p><input id="url" placeholder="https://PROJECT.supabase.co/functions/v1/connector"></p><button id="save">Save URL</button><p><input id="code" placeholder="8-character pairing code"></p><p><input id="name" placeholder="Device name" value="Shop PC"></p><button id="pair">Pair device</button></div><div class="panel"><h3>Connection</h3><p id="state">Loading...</p><button id="status">Check status</button><button id="heartbeat">Send heartbeat</button><button id="rotate">Rotate credentials</button><button id="unpair">Forget local pairing</button><p><small>Forgetting a local pairing does not revoke the device on the website.</small></p></div><div class="panel"><h3>Inventory cloud upload / Sync Now</h3><p>Backend phases B and C are not yet available. Feature flags are off by default; 501 not_available is handled as an unavailable feature.</p></div><pre id="result" role="status"></pre></main><script src="./ui.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CACADUU Inventory Sync</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <aside>
+      <div class="brand">
+        <span class="brand-icon">C</span>
+        <div>CACADUU<small>INVENTORY WORKSPACE</small></div>
+      </div>
+      <nav aria-label="Main navigation">
+        <button data-page="overview" class="active">
+          ◈ <span>Overview</span></button
+        ><button data-page="connections">⇄ <span>Connections</span></button
+        ><button data-page="groups">▦ <span>Connection Groups</span></button
+        ><button data-page="sync">⟳ <span>Inventory Sync</span></button
+        ><button data-page="mapping">≡ <span>Products & Mapping</span></button
+        ><button data-page="history">◷ <span>Sync History & Logs</span></button
+        ><button data-page="settings">⚙ <span>Settings</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="dot"></span> Standalone desktop<small
+          >Cloud connection is optional</small
+        >
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">YOUR INVENTORY, CONNECTED</div>
+          <h1 id="page-title">Overview</h1>
+        </div>
+        <button id="refresh" class="secondary">↻ Refresh</button>
+      </header>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="overview" class="view">
+        <div class="hero">
+          <div>
+            <span class="pill">LOCAL FIRST</span>
+            <h2>One workspace.<br />Every stock connection.</h2>
+            <p>
+              Map your products, choose a source, and keep inventory changes
+              under control.
+            </p>
+            <button id="get-started">Manage connections →</button>
+          </div>
+          <div class="hero-art" aria-hidden="true">▦ <span>⇄</span> ▦</div>
+        </div>
+        <div class="stats">
+          <article>
+            <small>Connections</small><strong id="stat-connections">0</strong
+            ><span>Configured destinations & sources</span>
+          </article>
+          <article>
+            <small>Enabled groups</small><strong id="stat-groups">0</strong
+            ><span>Scheduled while this app is open</span>
+          </article>
+          <article>
+            <small>Outstanding jobs</small><strong id="stat-jobs">0</strong
+            ><span>Pending or held for review</span>
+          </article>
+        </div>
+        <div class="panel">
+          <h2>Designed to fail safely</h2>
+          <p>
+            Explicit product and warehouse mappings are required. Conflicting
+            quantities are held for review. Read-only connections cannot receive
+            stock changes.
+          </p>
+          <p class="muted">
+            Local delivery: stock.csv + manifest.json. Complete, verified
+            catalogue data is required; invalid input preserves your previous
+            export.
+          </p>
+        </div>
+        <div class="panel">
+          <h2>Recent activity</h2>
+          <div id="recent"></div>
+        </div>
+      </section>
+      <section id="connections" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>Your connections</h2>
+            <p class="muted">
+              Tests only read inventory. They never change merchant stock.
+            </p>
+          </div>
+          <button id="new-connection">+ Add connection</button>
+        </div>
+        <div id="connection-list" class="card-grid"></div>
+        <form id="connection-form" class="panel" hidden>
+          <h2 id="connection-heading">Add connection</h2>
+          <input name="id" type="hidden" />
+          <div class="form-grid">
+            <label
+              >Connection name<input
+                name="name"
+                required
+                maxlength="200"
+                placeholder="Warehouse or store name" /></label
+            ><label
+              >Platform<select name="platform">
+                <option value="file">CSV / XML / JSON file</option>
+                <option value="woocommerce">WooCommerce</option>
+                <option value="shopify">Shopify</option>
+                <option value="shoptet">Shoptet — setup required</option>
+                <option value="pos">Local POS — driver required</option>
+                <option value="cacaduu">CACADUU Cloud — optional</option>
+              </select></label
+            ><label data-field="baseUrl"
+              >Store HTTPS URL<input
+                name="baseUrl"
+                type="url"
+                placeholder="https://store.example.com" /></label
+            ><label data-field="shopDomain"
+              >Shop domain<input
+                name="shopDomain"
+                placeholder="store.myshopify.com" /></label
+            ><label data-field="stockPath"
+              >Inventory file path<input
+                name="stockPath"
+                placeholder="C:\Inventory\stock.csv"
+              /><button type="button" id="choose-file" class="secondary">
+                Choose file
+              </button></label
+            ><label data-field="token"
+              >API key / access token<input
+                name="token"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to keep stored credential" /></label
+            ><label data-field="secret"
+              >API secret<input
+                name="secret"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to keep stored credential" /></label
+            ><label
+              >Permission<select name="permission">
+                <option value="read">Read only</option>
+                <option value="read_write">
+                  Read & write (explicit consent)
+                </option>
+              </select></label
+            >
+          </div>
+          <p id="platform-help" class="hint"></p>
+          <p class="hint">
+            Credentials stay in OS encrypted storage and are never returned to
+            this page. A read test does not verify write access.
+          </p>
+          <button type="submit">Save connection</button
+          ><button type="button" id="cancel-connection" class="secondary">
+            Cancel
+          </button>
+        </form>
+      </section>
+      <section id="groups" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>Connection groups</h2>
+            <p class="muted">
+              Choose authority, permissions, mappings and polling interval.
+            </p>
+          </div>
+          <button id="new-group">+ Create group</button>
+        </div>
+        <div id="group-list" class="card-grid"></div>
+        <form id="group-form" class="panel" hidden>
+          <h2>Configure group</h2>
+          <div class="form-grid">
+            <label
+              >Group ID<input
+                name="id"
+                required
+                pattern="[A-Za-z0-9_-]+"
+                placeholder="warehouse-to-store" /></label
+            ><label
+              >Mode<select name="mode">
+                <option value="master">Master source</option>
+                <option value="two_way">
+                  Two-way (atomic compare-and-swap required)
+                </option>
+              </select></label
+            ><label>Master source<select name="masterId"></select></label
+            ><label
+              >Interval (minutes)<input
+                name="intervalMinutes"
+                type="number"
+                min="1"
+                max="10080"
+                value="15"
+                required
+            /></label>
+          </div>
+          <label class="check"
+            ><input name="enabled" type="checkbox" />Enable scheduled sync and
+            manual Sync Now</label
+          >
+          <p class="hint">
+            Select at least two members. Master must have source role. Each
+            mapping line is <code>local ID = shared ID</code>. Every source item
+            and warehouse must be explicitly mapped. Two-way requires all
+            members to support atomic writes; WooCommerce and generic POS are
+            excluded.
+          </p>
+          <div id="group-members"></div>
+          <button type="submit">Save group</button
+          ><button id="cancel-group" type="button" class="secondary">
+            Cancel
+          </button>
+        </form>
+      </section>
+      <section id="sync" class="view" hidden>
+        <div class="panel">
+          <h2>Inventory synchronization</h2>
+          <p>
+            Sync Now can update destinations with read/write permission. Review
+            mappings and test with sandbox stores first. Schedules run only
+            while this application remains open.
+          </p>
+          <p class="hint">
+            Failed atomic operations retry with backoff (up to five attempts).
+            Changed destinations and uncertain non-atomic writes are held. Held
+            jobs require reconciliation; automatic overwrite is never used to
+            resolve them.
+          </p>
+        </div>
+        <div id="sync-list" class="card-grid"></div>
+        <div class="panel">
+          <h2>Job queue</h2>
+          <div id="sync-jobs"></div>
+        </div>
+      </section>
+      <section id="mapping" class="view" hidden>
+        <div class="panel">
+          <h2>Inspect products & warehouses</h2>
+          <p class="muted">
+            Read the connection's inventory to discover exact IDs. No automatic
+            SKU or display-name matching.
+          </p>
+          <label>Connection<select id="inspect-connection"></select></label
+          ><button id="inspect">Read inventory</button
+          ><button id="edit-mappings" class="secondary">
+            Configure group mappings →
+          </button>
+          <p class="hint">
+            Up to 1,000 observations shown. Use explicit per-member product and
+            warehouse maps in Connection Groups.
+          </p>
+          <div id="inventory-table"></div>
+        </div>
+      </section>
+      <section id="history" class="view" hidden>
+        <div class="panel">
+          <h2>Sync history</h2>
+          <div id="history-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Conflict history</h2>
+          <p class="hint">
+            Historical conflict records are retained. Correct quantities at the
+            source after review; only agreement establishes a new two-way
+            baseline. Outstanding jobs must be reconciled separately.
+          </p>
+          <div id="conflict-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Persistent jobs</h2>
+          <div id="job-table"></div>
+        </div>
+      </section>
+      <section id="settings" class="view" hidden>
+        <div class="panel">
+          <h2>Local workspace</h2>
+          <p>Default output: <strong>stock.csv + manifest.json</strong></p>
+          <p id="export-path" class="path"></p>
+          <p>
+            Local exports require source code, product name, price, currency and
+            quantity. Multi-warehouse exports require an explicit aggregation
+            policy and are held if product codes repeat.
+          </p>
+          <p id="secure-state"></p>
+          <p class="hint">
+            No telemetry or cloud account is required for local exports. Windows
+            credentials use Electron safeStorage / DPAPI under your Windows
+            account.
+          </p>
+        </div>
+        <div class="panel">
+          <span class="pill">OPTIONAL</span>
+          <h2>CACADUU Cloud Connection</h2>
+          <p>
+            Phase A: pairing, scheduled heartbeat, status and credential
+            rotation. Inventory upload and commands remain feature-gated and are
+            not part of local sync.
+          </p>
+          <label
+            >HTTPS pairing URL<input
+              id="url"
+              placeholder="https://PROJECT.supabase.co/functions/v1/connector" /></label
+          ><button id="save">Save URL</button>
+          <div class="form-grid">
+            <label
+              >Pairing code<input
+                id="code"
+                placeholder="K7QM-4WXP"
+                autocomplete="off" /></label
+            ><label
+              >Device name<input id="name" value="Shop PC" maxlength="100"
+            /></label>
+          </div>
+          <button id="pair">Pair device</button>
+          <p id="state">Not paired</p>
+          <div class="actions">
+            <button id="status" class="secondary">Check status</button
+            ><button id="heartbeat" class="secondary">Send heartbeat</button
+            ><button id="rotate" class="secondary">Rotate credentials</button
+            ><button id="unpair" class="secondary">Forget local pairing</button>
+          </div>
+          <p class="hint">
+            Forgetting local pairing does not revoke the device remotely. Use
+            Môj obchod to revoke it. HTTP 501 not_available does not disable
+            other destinations.
+          </p>
+        </div>
+      </section>
+    </main>
+    <script src="./ui.js"></script>
+  </body>
+</html>
