@@ -1,0 +1,1756 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cacaduu Cloud API for the POS Sync Agent",
+    "version": "1.0.0",
+    "description": "See docs/CONNECTOR_CLOUD_API.md. Every request carries the header Cacaduu-Agent-Version. x-cacaduu-phase: A = live (update 50); B and C answer 501 not_available until their updates are deployed."
+  },
+  "servers": [
+    {
+      "url": "https://{projectRef}.supabase.co/functions/v1/connector",
+      "variables": {
+        "projectRef": {
+          "default": "your-project-ref"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "deviceToken": []
+    }
+  ],
+  "paths": {
+    "/v1/pair": {
+      "post": {
+        "operationId": "pair",
+        "summary": "Pair this computer with one shop using a pairing code",
+        "x-cacaduu-phase": "A",
+        "responses": {
+          "201": {
+            "description": "Paired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PairResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "pairing_locked (Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "update_required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "server_error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairRequest"
+              }
+            }
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/heartbeat": {
+      "post": {
+        "operationId": "heartbeat",
+        "summary": "Heartbeat: report status, get pending commands and polling info",
+        "x-cacaduu-phase": "A",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeartbeatRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "operationId": "status",
+        "summary": "The device's shop, state and latest sync",
+        "x-cacaduu-phase": "A",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/credentials/rotate": {
+      "post": {
+        "operationId": "rotateCredentials",
+        "summary": "Get a new device token; the old one works until the new one is used (max 24 h)",
+        "x-cacaduu-phase": "A",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/inventory/snapshots": {
+      "post": {
+        "operationId": "createSnapshot",
+        "summary": "Announce a full snapshot and get a signed upload URL",
+        "x-cacaduu-phase": "B",
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotState"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Already known (idempotent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotState"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "too_large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "clock_ahead",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnapshotAnnounce"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/inventory/snapshots/{id}/complete": {
+      "post": {
+        "operationId": "completeSnapshot",
+        "summary": "The upload is done: check and apply (or hold) the snapshot",
+        "x-cacaduu-phase": "B",
+        "responses": {
+          "200": {
+            "description": "Applied, held, test_ok or rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotState"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Processing; ask GET /v1/inventory/snapshots/{id}",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/inventory/snapshots/{id}": {
+      "get": {
+        "operationId": "getSnapshot",
+        "summary": "A snapshot's state and result",
+        "x-cacaduu-phase": "B",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SnapshotState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/inventory/confirm": {
+      "post": {
+        "operationId": "confirmUnchanged",
+        "summary": "Confirm unchanged stock (same content hash as the last applied snapshot)",
+        "x-cacaduu-phase": "B",
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "send_full_snapshot or stale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "clock_ahead",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/commands": {
+      "get": {
+        "operationId": "listCommands",
+        "summary": "Pending commands for this device's shop",
+        "x-cacaduu-phase": "C",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "commands"
+                  ],
+                  "properties": {
+                    "commands": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Command"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          }
+        ]
+      }
+    },
+    "/v1/commands/{id}/claim": {
+      "post": {
+        "operationId": "claimCommand",
+        "summary": "Claim a pending command (atomic; 2-minute lease)",
+        "x-cacaduu-phase": "C",
+        "responses": {
+          "200": {
+            "description": "Claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Command"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "already_claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/commands/{id}/result": {
+      "post": {
+        "operationId": "reportCommand",
+        "summary": "Report running (renews the lease), failed or completed",
+        "x-cacaduu-phase": "C",
+        "responses": {
+          "200": {
+            "description": "Recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Command"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "snapshot_not_applied or not claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request or missing Cacaduu-Agent-Version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "426": {
+            "description": "Agent too old (update_required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, wrong or revoked device token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Phase not switched on yet (not_available)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AgentVersion"
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommandResult"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "deviceToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cdt_<43 base64url characters>"
+      }
+    },
+    "parameters": {
+      "AgentVersion": {
+        "name": "Cacaduu-Agent-Version",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": "1.4.2"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "bad_request",
+              "agent_version_required",
+              "invalid_code",
+              "unauthorized",
+              "not_found",
+              "method_not_allowed",
+              "stale",
+              "send_full_snapshot",
+              "already_claimed",
+              "snapshot_not_applied",
+              "too_large",
+              "clock_ahead",
+              "update_required",
+              "pairing_locked",
+              "rate_limited",
+              "server_error",
+              "not_available"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "retry_after": {
+            "type": "integer"
+          },
+          "min_agent_version": {
+            "type": "string"
+          }
+        }
+      },
+      "PairRequest": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "8 letters from ABCDEFGHJKMNPQRSTUVWXYZ23456789; a dash, spaces and case are ignored",
+            "example": "K7QM-4WXP"
+          },
+          "device_name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "PairResponse": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "device_token",
+          "shop",
+          "api_base_url",
+          "next_poll_seconds",
+          "min_agent_version",
+          "server_time"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "device_token": {
+            "type": "string",
+            "pattern": "^cdt_[A-Za-z0-9_-]{43}$",
+            "description": "Shown once; store it in the OS secure storage"
+          },
+          "shop": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "api_base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "next_poll_seconds": {
+            "type": "integer",
+            "minimum": 15
+          },
+          "min_agent_version": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "HeartbeatRequest": {
+        "type": "object",
+        "properties": {
+          "agent_version": {
+            "type": "string"
+          },
+          "os": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "source_label": {
+            "type": "string",
+            "maxLength": 80,
+            "example": "POHODA XML"
+          },
+          "last_read": {
+            "type": "object",
+            "properties": {
+              "result": {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "unchanged",
+                  "error",
+                  "none"
+                ]
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 500,
+                "description": "Plain text without passwords"
+              }
+            }
+          }
+        }
+      },
+      "HeartbeatResponse": {
+        "type": "object",
+        "required": [
+          "shop",
+          "commands",
+          "api_base_url",
+          "next_poll_seconds",
+          "min_agent_version",
+          "server_time"
+        ],
+        "properties": {
+          "shop": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Command"
+            }
+          },
+          "api_base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "next_poll_seconds": {
+            "type": "integer",
+            "minimum": 15
+          },
+          "min_agent_version": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": [
+          "shop",
+          "device",
+          "state"
+        ],
+        "properties": {
+          "shop": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              }
+            }
+          },
+          "device": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "paired_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "last_seen_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "error",
+              "never_synced",
+              "syncing"
+            ]
+          },
+          "last_sync": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          },
+          "api_base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "next_poll_seconds": {
+            "type": "integer",
+            "minimum": 15
+          },
+          "min_agent_version": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RotateResponse": {
+        "type": "object",
+        "required": [
+          "device_token",
+          "old_token_valid_until"
+        ],
+        "properties": {
+          "device_token": {
+            "type": "string",
+            "pattern": "^cdt_[A-Za-z0-9_-]{43}$"
+          },
+          "old_token_valid_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "api_base_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "next_poll_seconds": {
+            "type": "integer",
+            "minimum": 15
+          },
+          "min_agent_version": {
+            "type": "string"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "required": [
+          "source_code",
+          "name",
+          "price",
+          "currency",
+          "quantity"
+        ],
+        "additionalProperties": true,
+        "description": "Fields not listed here are dropped and never stored",
+        "properties": {
+          "source_code": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "ean": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "brand": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "price": {
+            "type": "number",
+            "minimum": 0
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "availability_status": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "warehouse": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "source_updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InventorySnapshot": {
+        "type": "object",
+        "description": "The uncompressed JSON that is gzipped and uploaded to upload_url",
+        "required": [
+          "format",
+          "snapshot_id",
+          "source_id",
+          "source_time",
+          "products"
+        ],
+        "properties": {
+          "format": {
+            "const": "cacaduu.inventory.v1"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_id": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "source_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            }
+          }
+        }
+      },
+      "SnapshotAnnounce": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "source_id",
+          "source_time",
+          "complete",
+          "product_count",
+          "content_hash"
+        ],
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_id": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "source_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "complete": {
+            "const": true
+          },
+          "product_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "command_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "SnapshotState": {
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "state"
+        ],
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting_upload",
+              "processing",
+              "applied",
+              "held",
+              "test_ok",
+              "rejected",
+              "expired"
+            ]
+          },
+          "upload_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "upload_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "products": {
+                "type": "integer"
+              },
+              "imported": {
+                "type": "integer"
+              },
+              "zeroed": {
+                "type": "integer"
+              },
+              "skipped": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "ConfirmRequest": {
+        "type": "object",
+        "required": [
+          "content_hash",
+          "source_time"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "command_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "ConfirmResponse": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "const": "confirmed"
+          }
+        }
+      },
+      "Command": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "sync_inventory",
+              "ping"
+            ],
+            "description": "Agents ignore any other type"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "claimed",
+              "running",
+              "completed",
+              "failed",
+              "expired"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lease_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "attempt": {
+            "type": "integer"
+          }
+        }
+      },
+      "CommandResult": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "failed",
+              "completed"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    }
+  }
+}
