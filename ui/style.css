@@ -870,3 +870,24 @@ aside {
   line-height: 1;
   font-size: 17px;
 }
+.regional-support {
+  margin: 24px 0;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.regional-support summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.regional-support > select {
+  max-width: 240px;
+  margin-bottom: 20px;
+}
+.regional-support .card-grid {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+.regional-support .card p {
+  font-size: 12px;
+}

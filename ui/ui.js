@@ -156,6 +156,7 @@ function render() {
     capabilities,
   );
   renderPosConnections();
+  renderRegionalConnectors();
   const groupList = $("group-list"),
     syncList = $("sync-list");
   groupList.replaceChildren();
@@ -854,7 +855,12 @@ function selectWizardKind(kind) {
   const method = integrationMethods.find((m) => m.id === kind),
     provider = $("wizard-provider");
   provider.replaceChildren();
-  method.vendor.forEach((v) => option(provider, v, v));
+  const regional = (snapshot.regionalConnectors ?? [])
+    .filter((profile) => kind === "file" || profile.method === kind)
+    .map((profile) => profile.name);
+  [...new Set([...method.vendor, ...regional])].forEach((v) =>
+    option(provider, v, v),
+  );
   document
     .querySelectorAll("#wizard-types [data-integration]")
     .forEach((tile) => {
@@ -911,6 +917,17 @@ function wizardFields() {
           ? "Optional Cloud pairing is completed in Settings. Inventory upload is not an active destination."
           : method.state +
             ". You can save this setup, but it will not connect or synchronize until a verified driver is implemented.";
+  const regional = (snapshot.regionalConnectors ?? []).find(
+    (profile) => profile.name === $("wizard-provider").value,
+  );
+  if (regional)
+    $("wizard-config-help").textContent =
+      (platform === "file"
+        ? "Normalized file source only. Native vendor exports require explicit conversion to the documented handover schema. "
+        : "Native driver is setup required. ") +
+      regional.access +
+      " " +
+      regional.stockCaveat;
   $("wizard-preview").hidden = platform !== "file";
   $("wizard-permission").disabled = !supportedCloud;
   if (!supportedCloud) $("wizard-permission").value = "read";
@@ -919,7 +936,11 @@ function wizardDraft() {
   const name = $("wizard-name").value.trim(),
     platform = wizardPlatform();
   if (!name) throw new Error("Enter a connection name.");
+  const regional = (snapshot.regionalConnectors ?? []).find(
+    (profile) => profile.name === $("wizard-provider").value,
+  );
   const draft = {
+    ...(regional ? { regionalVendorId: regional.id } : {}),
     name,
     platform,
     integrationKind: wizardKind,
@@ -1145,3 +1166,47 @@ $("wizard-test").onclick = () =>
   });
 $("wizard-save").onclick = () => wizardAction(() => saveWizard());
 renderIntegrationCatalog();
+
+function renderRegionalConnectors() {
+  const root = $("regional-connectors");
+  root.replaceChildren();
+  const country = $("regional-country").value;
+  const profiles = (snapshot.regionalConnectors ?? []).filter(
+    (profile) => country === "all" || profile.countries.includes(country),
+  );
+  if (!profiles.length) {
+    root.append(
+      element(
+        "p",
+        "Regional profiles are available in the desktop app.",
+        "muted",
+      ),
+    );
+    return;
+  }
+  profiles.forEach((profile) => {
+    const card = element("article", undefined, "card");
+    card.append(
+      element(
+        "span",
+        profile.priority === 1 ? "FIRST WAVE" : "SETUP REQUIRED",
+        "badge",
+      ),
+      element("h3", profile.name),
+      element("p", profile.countries.join(" · "), "muted"),
+      element("p", profile.access),
+      element("p", profile.stockCaveat, "hint"),
+    );
+    card.append(
+      button("Prepare setup", () => {
+        openPosWizard(profile.method);
+        $("wizard-provider").value = profile.name;
+        $("wizard-name").value = profile.name;
+        wizardFields();
+        setWizardStep(2);
+      }),
+    );
+    root.append(card);
+  });
+}
+$("regional-country").onchange = renderRegionalConnectors;

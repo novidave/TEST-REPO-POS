@@ -579,3 +579,68 @@ test("unrelated connections remain configurable while a different group is queue
     service.busy.delete(group.id);
   }
 });
+test("regional priorities distinguish 14 requested vendor profiles from implemented drivers", async (t) => {
+  const { service } = await fixture(t);
+  const profiles = service.snapshot().regionalConnectors;
+  assert.equal(profiles.length, 14);
+  assert.ok(
+    profiles.every((profile) => profile.nativeState === "setup_required"),
+  );
+  assert.equal(profiles.find((p) => p.id === "dotykacka").priority, 1);
+  assert.deepEqual(profiles.find((p) => p.id === "dotykacka").countries, [
+    "SK",
+    "CZ",
+    "PL",
+  ]);
+  assert.equal(profiles.find((p) => p.id === "pohoda").method, "local_api");
+  assert.notEqual(
+    profiles.find((p) => p.id === "subiekt_gt").id,
+    profiles.find((p) => p.id === "subiekt_nexo").id,
+  );
+  const setup = await service.saveConnection({
+    id: "regional-pohoda",
+    name: "POHODA company",
+    platform: "pos",
+    permission: "read",
+    integrationKind: "local_api",
+    regionalVendorId: "pohoda",
+    vendor: "POHODA (mServer)",
+    setupEndpoint: "http://localhost:444/xml",
+  });
+  assert.equal(setup.status, "setup_required");
+  const status = await service.testConnection(setup.id);
+  assert.equal(status.state, "setup_required");
+  assert.match(status.message, /mServer/);
+  await service.saveConnection({
+    id: setup.id,
+    name: "Renamed company",
+    platform: "pos",
+    permission: "read",
+  });
+  assert.equal(
+    service.connections().find((c) => c.id === setup.id).regionalVendorId,
+    "pohoda",
+  );
+});
+test("regional metadata cannot falsely turn an unimplemented vendor into a native API driver", async (t) => {
+  const { service } = await fixture(t);
+  await assert.rejects(
+    service.saveConnection({
+      name: "Dotykačka",
+      platform: "shopify",
+      shopDomain: "fixture.myshopify.com",
+      permission: "read",
+      regionalVendorId: "dotykacka",
+    }),
+    /no native driver/,
+  );
+  await assert.rejects(
+    service.saveConnection({
+      name: "Unknown",
+      platform: "pos",
+      permission: "read",
+      regionalVendorId: "unknown",
+    }),
+    /Unknown regional/,
+  );
+});

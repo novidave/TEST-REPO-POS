@@ -132,6 +132,24 @@
           </div>
           <div id="connection-list" class="connection-rows"></div>
         </div>
+        <details class="regional-support">
+          <summary>
+            Regional POS systems — Slovakia, Czech Republic &amp; Poland
+          </summary>
+          <p class="muted">
+            Requested integration priorities. Native drivers are setup required;
+            a compatible normalized file export can use the existing file
+            connector.
+          </p>
+          <label for="regional-country">Market</label
+          ><select id="regional-country">
+            <option value="all">All markets</option>
+            <option value="SK">Slovakia</option>
+            <option value="CZ">Czech Republic</option>
+            <option value="PL">Poland</option>
+          </select>
+          <div id="regional-connectors" class="card-grid"></div>
+        </details>
         <details class="integration-help" open>
           <summary>Which integration method should I choose?</summary>
           <div id="integration-guides" class="integration-guides"></div>

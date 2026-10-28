@@ -1,3 +1,4 @@
+import { regionalConnectors, regionalConnector } from "./regional-connectors";
 import { connectorCapabilities } from "./connectors";
 import {
   SyncCoordinator,
@@ -35,6 +36,7 @@ export interface DesktopConnection {
     | "gui_automation"
     | "hardware_database";
   vendor?: string;
+  regionalVendorId?: string;
   setupEndpoint?: string;
   setupPath?: string;
   productMappings?: Record<string, string>;
@@ -132,6 +134,7 @@ export class DesktopService {
   snapshot() {
     return {
       connectorCapabilities,
+      regionalConnectors,
       runtime: {
         groups: this.runtime.stats(),
         requests: providerRequests.stats(),
@@ -223,6 +226,19 @@ export class DesktopService {
       throw new UserError(
         "Create a new connection to change the store endpoint; existing credentials and jobs stay with the original store",
       );
+    const regionalId = value.regionalVendorId ?? previous?.regionalVendorId;
+    if (regionalId !== undefined) {
+      const profile =
+        typeof regionalId === "string"
+          ? regionalConnector(regionalId)
+          : undefined;
+      if (!profile) throw new UserError("Unknown regional connector profile");
+      if (platform !== "pos" && platform !== "file")
+        throw new UserError(
+          "This regional vendor has no native driver; use POS setup or a verified normalized file source",
+        );
+      c.regionalVendorId = profile.id;
+    }
     const kind = value.integrationKind ?? previous?.integrationKind;
     if (kind !== undefined) {
       if (
@@ -397,8 +413,9 @@ export class DesktopService {
     if (["pos", "shoptet", "cacaduu"].includes(c.platform))
       return {
         state: "setup_required",
-        message:
-          c.platform === "cacaduu"
+        message: c.regionalVendorId
+          ? `${regionalConnector(c.regionalVendorId)?.name}: ${regionalConnector(c.regionalVendorId)?.access}`
+          : c.platform === "cacaduu"
             ? "Use optional Cloud pairing in Settings"
             : "No verified vendor driver/API authorization configured",
       };

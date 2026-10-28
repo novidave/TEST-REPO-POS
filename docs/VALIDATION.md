@@ -6,12 +6,12 @@ Validated on 2026-10-28 in the managed Linux environment, from a clean `npm ci` 
 |---|---|
 | `ELECTRON_GET_USE_PROXY=1 npm ci` | Passed; clean lockfile installation |
 | `npm run build` / `npm run check` | Passed; TypeScript compilation and strict type check |
-| `npm test` | 94 passed, 0 failed, 0 skipped; includes real temporary SQLite stores, CLI subprocess, pause during preflight/write, endpoint binding, concurrent configuration edits, shutdown, stale-baseline, bounded concurrency, durable provider deadlines, and 120-connection restart/failure load tests |
-| `npm exec --yes --package=node@22.15.0 -- node --test tests/*.test.cjs` | Passed; all 94 core tests under Node 22.15.0 |
+| `npm test` | 96 passed, 0 failed, 0 skipped; includes real temporary SQLite stores, CLI subprocess, pause during preflight/write, endpoint binding, concurrent configuration edits, shutdown, stale-baseline, bounded concurrency, durable provider deadlines, and 120-connection restart/failure load tests |
+| `npm exec --yes --package=node@22.15.0 -- node --test tests/*.test.cjs` | Passed; all 96 core tests under Node 22.15.0 |
 | `ELECTRON_TEST_HEADLESS=1 npm run test:electron:scale` | Passed; 120 connections created through real Electron IPC, persisted in SQLite, rendered/searched and retained on profile restart |
 | `npm run test:scale` | Passed; 120 configured test connections, 60 groups, 1,500 writes, all 60 export checksums, zero duplicate writes on restart, throttled-destination recovery |
 | `npm run format:check` | Passed |
-| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:ui` | 10 browser tests passed; mocked bridge; includes seven views, file setup, secret-field clearing, unsupported states, group maps/roles, Pause/Resume, manual sync, POS wizard file preview/mapping templates, API credential clearing, six method guides, capability/capacity display, search/filter including 120 connections, and unsupported states |
+| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:ui` | 11 browser tests passed; mocked bridge; includes seven views, file setup, secret-field clearing, unsupported states, group maps/roles, Pause/Resume, manual sync, POS wizard file preview/mapping templates, API credential clearing, six method guides, capability/capacity display, search/filter including 120 connections, regional market filtering/native setup requirements, and unsupported states |
 | `npm run native:electron` | Passed; SQLite transaction under actual Electron Node-API runtime |
 | `ELECTRON_TEST_HEADLESS=1 npm run test:electron` | Passed; real app, sandboxed renderer and IPC; POS wizard setup, real unsaved file preview, persisted mapping templates, file read test, SQLite persistence, export and preservation after invalid input; same-profile restart verified |
 | `npm run smoke:electron -- --ozone-platform=headless` | Passed; startup, seven views, isolated renderer, IPC and native SQLite; container emitted display/DBus warnings |
@@ -28,6 +28,8 @@ Runtime limits and platform-specific setup requirements are documented in the RE
 
 ## 120-connection measurements
 
-The final Node 24 run measured the first 60-group/1,500-write cycle at **1,344 ms**; Node 22.15 measured **867 ms** on the same managed Linux host. Peak group concurrency was **4**; the scenario used **180 full inventory reads** including 60 local exports and **3,000 fresh targeted reads**. After reopening and rerunning, the write count remained exactly **1,500** (zero duplicates). Each successful export manifest matched the actual CSV SHA-256. The throttled-destination scenario preserved pending IDs/deadlines across restart and recovered while the other 59 groups completed independently.
+A completed Node 24 scaling run measured the first 60-group/1,500-write cycle at **1,344 ms**; Node 22.15 measured **867 ms** on the same managed Linux host. Peak group concurrency was **4**; the scenario used **180 full inventory reads** including 60 local exports and **3,000 fresh targeted reads**. After reopening and rerunning, the write count remained exactly **1,500** (zero duplicates). Each successful export manifest matched the actual CSV SHA-256. The throttled-destination scenario preserved pending IDs/deadlines across restart and recovered while the other 59 groups completed independently.
 
 These are individual synthetic adapter timings using real DesktopService/SQLite/exports (including operating-system/cache effects), not measurements of real merchant API latency. Separate controlled-clock tests verify 120-origin request throttling, response-body concurrency, scheduler staggering and shutdown/backpressure. No new native vendor support is implied. See [SCALABILITY.md](SCALABILITY.md) for bounds and limitations.
+
+Regional coverage: 14 user-requested SK/CZ/PL preparation profiles are exposed and tested, all with native state `setup_required`. The profile selection does not instantiate a vendor API/SDK driver. Official Dotypos and Stormware documentation requests were denied by the running network policy; no native contract or vendor authorization is claimed verified. See [REGIONAL_CONNECTORS.md](REGIONAL_CONNECTORS.md).

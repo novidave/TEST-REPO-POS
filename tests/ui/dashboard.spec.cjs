@@ -8,6 +8,39 @@ async function open(page) {
       jobs: [],
       conflicts: [],
       exportDirectory: "test/exports",
+      regionalConnectors: [
+        {
+          id: "dotykacka",
+          name: "Dotykačka",
+          countries: ["SK", "CZ", "PL"],
+          priority: 1,
+          method: "cloud_api",
+          nativeState: "setup_required",
+          access:
+            "Official stock API and merchant authorization must be verified.",
+          stockCaveat: "Complete inventory required.",
+        },
+        {
+          id: "pohoda",
+          name: "POHODA (mServer)",
+          countries: ["SK", "CZ"],
+          priority: 1,
+          method: "local_api",
+          nativeState: "setup_required",
+          access: "Configured mServer and pinned XML schema required.",
+          stockCaveat: "Vendor XML needs explicit conversion.",
+        },
+        {
+          id: "subiekt_gt",
+          name: "InsERT Subiekt GT",
+          countries: ["PL"],
+          priority: 2,
+          method: "hardware_database",
+          nativeState: "setup_required",
+          access: "Paid Sfera SDK/license and Windows bridge required.",
+          stockCaveat: "No speculative database writes.",
+        },
+      ],
     };
     window.desktop = {
       snapshot: async () => structuredClone(data),
@@ -377,4 +410,35 @@ test("POS dashboard lists and searches 120 configured connections", async ({
   await expect(page.locator("#connection-list")).toContainText(
     "Scale fixture 119",
   );
+});
+test("regional catalog filters markets and opens accurate native setup requirements", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator(".regional-support summary").click();
+  await expect(page.locator("#regional-connectors .card")).toHaveCount(3);
+  await page.locator("#regional-country").selectOption("PL");
+  await expect(page.locator("#regional-connectors")).toContainText(
+    "InsERT Subiekt GT",
+  );
+  await expect(page.locator("#regional-connectors")).not.toContainText(
+    "POHODA",
+  );
+  await page.locator("#regional-country").selectOption("CZ");
+  const pohoda = page.locator("#regional-connectors .card").filter({
+    has: page.getByRole("heading", { name: "POHODA (mServer)", exact: true }),
+  });
+  await pohoda.getByRole("button", { name: "Prepare setup" }).click();
+  await expect(page.locator("#wizard-name")).toHaveValue("POHODA (mServer)");
+  await expect(page.locator("#wizard-config-help")).toContainText(
+    "Native driver is setup required",
+  );
+  await expect(page.locator("#wizard-config-help")).toContainText(
+    "pinned XML schema",
+  );
+  await expect(page.locator("#wizard-provider")).toHaveValue(
+    "POHODA (mServer)",
+  );
+  await expect(page.locator("#wizard-permission")).toBeDisabled();
 });

@@ -74,6 +74,10 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 | Local POS | Categorized setup wizard, encrypted setup credentials, explicit mapping templates; existing injectable driver interface retained | No POHODA/MRP/Elcom/Square/Lightspeed vendor drivers bundled; local API, CLI, GUI automation and hardware/database references are inert setup metadata. XLSX/DBF parsing and folder watching are not implemented; use verified CSV/XML/JSON files |
 | CACADUU | Phase A client + desktop controls, timed heartbeat | Optional; B/C contract wrappers feature-gated, no inventory upload/command execution workflow |
 
+## Slovakia, Czech Republic and Poland
+
+POS Connections includes 14 requested regional preparation profiles with country filtering. **Dotykačka and POHODA are prioritized first.** Portos, KROS OMEGA/ALFA, Money S3/S4, Storyous, Subiekt GT/nexo, PC-Market, Comarch Optima/POS and Profi Účtenka retain explicit access/schema requirements. These are not implemented native drivers. A normalized file can use the existing file driver after explicit conversion; vendor XML/DBF/XLSX is not assumed compatible. See [regional implementation priorities and documentation-access blocker](docs/REGIONAL_CONNECTORS.md).
+
 ## Cloud compatibility
 
 The contract under [docs/cloud-api](docs/cloud-api/) remains pinned and unchanged; CACADOO-PPI is not modified. Set an HTTPS pairing URL in Settings (or `CACADUU_PAIRING_URL`), then enter the pairing code. Tokens are encrypted before use. Heartbeats obey server polling intervals and retry-after guidance. Local forget does not remotely revoke the device.
