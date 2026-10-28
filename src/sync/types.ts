@@ -1,6 +1,13 @@
 import type { StockRow } from "../export";
 export type Platform =
-  "woocommerce" | "shopify" | "shoptet" | "pos" | "file" | "cacaduu";
+  | "odoo"
+  | "erpnext"
+  | "woocommerce"
+  | "shopify"
+  | "shoptet"
+  | "pos"
+  | "file"
+  | "cacaduu";
 export type SyncMode = "master" | "two_way";
 export interface Stock {
   productKey: string;

@@ -184,6 +184,20 @@
           <h2 id="connection-heading">Add connection</h2>
           <input name="id" type="hidden" />
           <div class="form-grid">
+            <label data-field="database"
+              >Odoo database<input name="database" /></label
+            ><label data-field="username"
+              >Odoo username<input
+                name="username"
+                type="password"
+                autocomplete="new-password" /></label
+            ><label data-field="password"
+              >Odoo API key<input
+                name="password"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+
             <label
               >Connection name<input
                 name="name"
@@ -193,6 +207,10 @@
             ><label
               >Platform<select name="platform">
                 <option value="file">CSV / XML / JSON file</option>
+                <option value="odoo">Odoo 18 — read only</option>
+                <option value="erpnext">
+                  ERPNext / Frappe v15 — read only
+                </option>
                 <option value="woocommerce">WooCommerce</option>
                 <option value="shopify">Shopify</option>
                 <option value="shoptet">Shoptet — setup required</option>

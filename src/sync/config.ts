@@ -1,3 +1,5 @@
+import { OdooAdapter } from "./adapters/odoo";
+import { ErpNextAdapter } from "./adapters/erpnext";
 import type { SyncGroup, InventoryAdapter } from "./types";
 import { WooCommerceAdapter } from "./adapters/woocommerce";
 import { ShopifyAdapter } from "./adapters/shopify";
@@ -5,8 +7,9 @@ import { ShoptetAdapter } from "./adapters/shoptet";
 import { FileInventoryAdapter } from "./adapters/file";
 export interface ConnectionConfig {
   id: string;
-  platform: "woocommerce" | "shopify" | "shoptet" | "file";
+  platform: "odoo" | "erpnext" | "woocommerce" | "shopify" | "shoptet" | "file";
   baseUrl?: string;
+  database?: string;
   shopDomain?: string;
   stockPath?: string;
   permission?: "read" | "read_write";
@@ -37,7 +40,31 @@ export function createAdapters(
   for (const c of config.connections) {
     if (result.has(c.id)) throw new Error("Duplicate connection ID");
     let a: InventoryAdapter;
-    if (c.platform === "woocommerce") {
+    if (c.platform === "odoo") {
+      if (
+        !c.baseUrl ||
+        !c.database ||
+        !env[c.credentialEnv ?? ""] ||
+        !env[c.secretEnv ?? ""]
+      )
+        throw new Error("Odoo configuration missing");
+      if (c.permission === "read_write") throw new Error("Odoo is read-only");
+      a = new OdooAdapter(
+        c.id,
+        c.baseUrl,
+        c.database,
+        env[c.credentialEnv!]!,
+        env[c.secretEnv!]!,
+      );
+    } else if (c.platform === "erpnext") {
+      const key = env[c.credentialEnv ?? ""],
+        secret = env[c.secretEnv ?? ""];
+      if (!c.baseUrl || !key || !secret)
+        throw new Error("ERPNext credentials missing");
+      a = new ErpNextAdapter(c.id, c.baseUrl, key, secret);
+      if (c.permission === "read_write")
+        throw new Error("ERPNext is read-only");
+    } else if (c.platform === "woocommerce") {
       const key = env[c.credentialEnv ?? ""];
       const secret = env[c.secretEnv ?? ""];
       if (!c.baseUrl || !key || !secret)

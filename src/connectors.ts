@@ -1,6 +1,26 @@
 /** Capabilities describe real drivers, independently of how many connections are configured. */
 export const connectorCapabilities = [
   {
+    platform: "odoo",
+    name: "Odoo 18 JSON-RPC",
+    state: "implemented",
+    read: true,
+    write: false,
+    twoWay: false,
+    detail:
+      "Read-only internal-location quants; database/API key and stock permissions required; live staging pending",
+  },
+  {
+    platform: "erpnext",
+    name: "ERPNext / Frappe v15",
+    state: "implemented",
+    read: true,
+    write: false,
+    twoWay: false,
+    detail:
+      "Read-only Bin actual stock; API token and Bin permissions required; whole units only; mocked contract tests, live staging pending",
+  },
+  {
     platform: "woocommerce",
     name: "WooCommerce",
     state: "implemented",

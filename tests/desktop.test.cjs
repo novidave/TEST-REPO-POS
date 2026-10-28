@@ -9,7 +9,12 @@ const cipher = {
   isEncryptionAvailable: () => true,
   encryptString: () => Buffer.from("opaque-ciphertext"),
   decryptString: () =>
-    JSON.stringify({ token: "private-token", secret: "private-secret" }),
+    JSON.stringify({
+      token: "private-token",
+      secret: "private-secret",
+      username: "private-user",
+      password: "private-key",
+    }),
 };
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), "desktop-"));
@@ -642,5 +647,51 @@ test("regional metadata cannot falsely turn an unimplemented vendor into a nativ
       regionalVendorId: "unknown",
     }),
     /Unknown regional/,
+  );
+});
+test("read-only ERP drivers reject write permissions and bind encrypted credentials to immutable endpoints", async (t) => {
+  const { service, dir } = await fixture(t);
+  for (const platform of ["erpnext", "odoo"]) {
+    const input = {
+      name: platform,
+      platform,
+      baseUrl: "https://erp.test",
+      database: "merchant-db",
+      permission: "read",
+      token: "private-token",
+      secret: "private-secret",
+      username: "private-user",
+      password: "private-key",
+    };
+    await assert.rejects(
+      service.saveConnection({ ...input, permission: "read_write" }),
+    );
+    const c = await service.saveConnection(input);
+    const adapter = await service.adapter(c.id);
+    assert.equal(adapter.capabilities.write, false);
+    assert.equal(adapter.write, undefined);
+    await assert.rejects(
+      service.saveConnection({
+        ...input,
+        id: c.id,
+        baseUrl: "https://different.test",
+      }),
+    );
+    if (platform === "odoo")
+      await assert.rejects(
+        service.saveConnection({
+          ...input,
+          id: c.id,
+          database: "different-db",
+        }),
+      );
+  }
+  assert.doesNotMatch(
+    JSON.stringify(service.snapshot()),
+    /private-(token|secret|user|key)/,
+  );
+  assert.doesNotMatch(
+    await readFile(join(dir, "credentials"), "utf8"),
+    /private-/,
   );
 });

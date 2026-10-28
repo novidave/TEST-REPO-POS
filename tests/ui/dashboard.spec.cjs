@@ -442,3 +442,34 @@ test("regional catalog filters markets and opens accurate native setup requireme
   );
   await expect(page.locator("#wizard-permission")).toBeDisabled();
 });
+test("ERPNext and Odoo setup stays read-only and clears authentication fields", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  for (const platform of ["erpnext", "odoo"]) {
+    await page.locator("#new-connection").click();
+    await page.locator('[name="platform"]').selectOption(platform);
+    await page.locator('[name="name"]').fill(platform);
+    await page.locator('[name="baseUrl"]').fill("https://erp.example.test");
+    await expect(page.locator('[name="permission"]')).toBeDisabled();
+    await expect(page.locator('[name="permission"]')).toHaveValue("read");
+    if (platform === "odoo") {
+      await page.locator('[name="database"]').fill("merchant");
+      await page.locator('[name="username"]').fill("private-user");
+      await page.locator('[name="password"]').fill("private-api-key");
+    } else {
+      await page.locator('[name="token"]').fill("private-api-key");
+      await page.locator('[name="secret"]').fill("private-api-secret");
+    }
+    await page
+      .getByRole("button", { name: "Save connection", exact: true })
+      .click();
+    await expect(page.locator("#connection-form")).toBeHidden();
+    for (const field of ["username", "password", "token", "secret"])
+      await expect(page.locator(`[name="${field}"]`)).toHaveValue("");
+    await expect(page.locator("#connection-list")).not.toContainText(
+      "private-",
+    );
+  }
+});

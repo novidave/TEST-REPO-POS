@@ -1,0 +1,40 @@
+{
+  "driver": "odoo",
+  "version": "Odoo 18 legacy JSON-RPC only; other versions unverified",
+  "commit": "42a390d04885691a5d7650db477278afaeac2a44",
+  "endpoint": "HTTPS /jsonrpc",
+  "calls": [
+    "common.authenticate(database, username, API key, {})",
+    "object.execute_kw(database, uid, API key, model, search_read, [domain], options)"
+  ],
+  "models": [
+    "stock.quant",
+    "product.product"
+  ],
+  "quantity": "Internal locations only. Sum real quantity and available_quantity over lots/owners per product/location. Whole nonnegative units only. SKU from default_code; no catalogue metadata inferred.",
+  "permissions": "Merchant must confirm API entitlement/hosting plan and complete stock/location/product read permissions; custom record rules can hide data. No writes.",
+  "verification": "Official source inspected; mocked protocol tests; no live merchant verification.",
+  "sources": {
+    "JSON-RPC route": {
+      "url": "https://github.com/odoo/odoo/blob/42a390d04885691a5d7650db477278afaeac2a44/odoo/addons/base/controllers/rpc.py",
+      "sha256": "7848bc26fd65051c8d9c4e49f2f3d01704eb9ac4738cdd71c74484838fc42eb5"
+    },
+    "Authentication": {
+      "url": "https://github.com/odoo/odoo/blob/42a390d04885691a5d7650db477278afaeac2a44/odoo/service/common.py",
+      "sha256": "d709b434921e5e962a832e178c3ea7e4887f98bd6a2ef5393054472411909b6b"
+    },
+    "Model execution": {
+      "url": "https://github.com/odoo/odoo/blob/42a390d04885691a5d7650db477278afaeac2a44/odoo/service/model.py",
+      "sha256": "6ff9d3ead2b5c4b57f3886e1a3ff438d3cfda2b70b50dad907f8097d93835883"
+    },
+    "Stock fields": {
+      "url": "https://github.com/odoo/odoo/blob/42a390d04885691a5d7650db477278afaeac2a44/addons/stock/models/stock_quant.py",
+      "sha256": "0aa9b1a5f9ea7a55f6f239622026701f98d263bc498810a1b77509276c834aaa"
+    },
+    "SKU field": {
+      "url": "https://github.com/odoo/odoo/blob/42a390d04885691a5d7650db477278afaeac2a44/addons/product/models/product_product.py",
+      "sha256": "7dceb4a9783739f931489fbf9046fcff736edbc942b3f380f838bad8bb2154e1"
+    }
+  },
+  "licensing": "Remote Odoo Community server LGPL-3.0; Enterprise modules and hosted API entitlement have separate commercial terms. No upstream implementation copied or SDK bundled; project license undeclared."
+}

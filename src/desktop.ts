@@ -1,3 +1,5 @@
+import { OdooAdapter } from "./sync/adapters/odoo";
+import { ErpNextAdapter } from "./sync/adapters/erpnext";
 import { regionalConnectors, regionalConnector } from "./regional-connectors";
 import { connectorCapabilities } from "./connectors";
 import {
@@ -24,6 +26,7 @@ export interface DesktopConnection {
   name: string;
   platform: Platform;
   baseUrl?: string;
+  database?: string;
   shopDomain?: string;
   stockPath?: string;
   permission: "read" | "read_write";
@@ -185,15 +188,24 @@ export class DesktopService {
       );
     const platform = text(value.platform, "Platform") as Platform;
     if (
-      !["woocommerce", "shopify", "shoptet", "pos", "file", "cacaduu"].includes(
-        platform,
-      )
+      ![
+        "odoo",
+        "erpnext",
+        "woocommerce",
+        "shopify",
+        "shoptet",
+        "pos",
+        "file",
+        "cacaduu",
+      ].includes(platform)
     )
       throw new UserError("Unsupported platform");
     if (value.permission !== "read" && value.permission !== "read_write")
       throw new UserError("Permission required");
     if (
-      ["file", "shoptet", "pos", "cacaduu"].includes(platform) &&
+      ["odoo", "erpnext", "file", "shoptet", "pos", "cacaduu"].includes(
+        platform,
+      ) &&
       value.permission !== "read"
     )
       throw new UserError("This connection is read-only or setup-required");
@@ -208,8 +220,9 @@ export class DesktopService {
           ? "configure_in_settings"
           : "not_tested",
     };
-    if (platform === "woocommerce")
+    if (["odoo", "woocommerce", "erpnext"].includes(platform))
       c.baseUrl = httpsUrl(text(value.baseUrl, "URL", 2000));
+    if (platform === "odoo") c.database = text(value.database, "Odoo database");
     if (platform === "shopify") {
       c.shopDomain = text(value.shopDomain, "Shop domain");
       if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(c.shopDomain))
@@ -220,8 +233,10 @@ export class DesktopService {
     const previous = this.connections().find((x) => x.id === id);
     if (
       previous &&
-      ((platform === "woocommerce" && previous.baseUrl !== c.baseUrl) ||
-        (platform === "shopify" && previous.shopDomain !== c.shopDomain))
+      ((["odoo", "woocommerce", "erpnext"].includes(platform) &&
+        previous.baseUrl !== c.baseUrl) ||
+        (platform === "shopify" && previous.shopDomain !== c.shopDomain) ||
+        (platform === "odoo" && previous.database !== c.database))
     )
       throw new UserError(
         "Create a new connection to change the store endpoint; existing credentials and jobs stay with the original store",
@@ -255,7 +270,9 @@ export class DesktopService {
         throw new UserError("Invalid integration type");
       if (
         (platform === "file" && kind !== "file") ||
-        (["woocommerce", "shopify", "cacaduu"].includes(platform) &&
+        (["odoo", "erpnext", "woocommerce", "shopify", "cacaduu"].includes(
+          platform,
+        ) &&
           kind !== "cloud_api") ||
         (platform === "shoptet" && kind !== "cloud_api")
       )
@@ -369,6 +386,25 @@ export class DesktopService {
     switch (c.platform) {
       case "file":
         adapter = new FileInventoryAdapter(c.id, c.stockPath!);
+        break;
+      case "odoo":
+        adapter = new OdooAdapter(
+          c.id,
+          c.baseUrl!,
+          c.database!,
+          credentials.username || "",
+          credentials.password || "",
+        );
+        break;
+      case "erpnext":
+        if (!credentials.token || !credentials.secret)
+          throw new UserError("ERPNext credentials required");
+        adapter = new ErpNextAdapter(
+          c.id,
+          c.baseUrl!,
+          credentials.token,
+          credentials.secret,
+        );
         break;
       case "woocommerce":
         if (!credentials.token || !credentials.secret)

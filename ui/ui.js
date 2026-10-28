@@ -288,6 +288,8 @@ function platformFields() {
   const platform = cf.elements.platform.value;
   const visible = {
     file: ["stockPath"],
+    odoo: ["baseUrl", "database", "username", "password"],
+    erpnext: ["baseUrl", "token", "secret"],
     woocommerce: ["baseUrl", "token", "secret"],
     shopify: ["shopDomain", "token"],
     pos: [],
@@ -298,11 +300,19 @@ function platformFields() {
     e.hidden = !visible.includes(e.dataset.field);
   });
   const permission = cf.elements.permission;
-  permission.disabled = ["file", "pos", "shoptet", "cacaduu"].includes(
-    platform,
-  );
+  permission.disabled = [
+    "odoo",
+    "erpnext",
+    "file",
+    "pos",
+    "shoptet",
+    "cacaduu",
+  ].includes(platform);
   if (permission.disabled) permission.value = "read";
   $("platform-help").textContent = {
+    odoo: "Odoo 18 read-only internal stock. API access must be permitted by your hosting plan and stock user rights. Enter username and API key; no writes or fractional-unit conversion.",
+    erpnext:
+      "Read-only Frappe v15 Bin actual stock. API user needs complete Bin/warehouse read permissions. Fractional units are refused; no inventory writes or inferred catalogue prices.",
     file: "CSV/XML handover fields: source_code, name, price, currency, quantity, warehouse, observed_at. JSON stock observations are also supported.",
     woocommerce:
       "Stock-managed products and variants. No atomic compare-and-swap: master mode only. Use sandbox stores to verify write access.",
@@ -322,12 +332,14 @@ function editConnection(c) {
     "name",
     "platform",
     "baseUrl",
+    "database",
     "shopDomain",
     "stockPath",
     "permission",
   ])
     if (c[key] !== undefined) cf.elements[key].value = c[key];
   cf.elements.platform.disabled = true;
+  cf.elements.database.readOnly = true;
   cf.elements.baseUrl.readOnly = true;
   cf.elements.shopDomain.readOnly = true;
   cf.hidden = false;
@@ -338,6 +350,7 @@ $("new-connection").onclick = () => {
   cf.reset();
   cf.elements.id.value = "";
   cf.elements.platform.disabled = false;
+  cf.elements.database.readOnly = false;
   cf.elements.baseUrl.readOnly = false;
   cf.elements.shopDomain.readOnly = false;
   cf.hidden = false;
@@ -363,6 +376,9 @@ cf.onsubmit = (e) => {
       "name",
       "platform",
       "baseUrl",
+      "database",
+      "username",
+      "password",
       "shopDomain",
       "stockPath",
       "permission",
@@ -375,6 +391,8 @@ cf.onsubmit = (e) => {
       cf.hidden = true;
       return "Connection saved. Run a read test before configuring synchronization.";
     } finally {
+      cf.elements.username.value = "";
+      cf.elements.password.value = "";
       cf.elements.token.value = "";
       cf.elements.secret.value = "";
     }
@@ -557,9 +575,10 @@ const integrationMethods = [
     subtitle: "Modern POS systems",
     description: "Connect to supported online inventory APIs.",
     path: "POS provider → authenticated API → inventory workspace",
-    examples: "WooCommerce, Shopify · Square / Lightspeed need drivers",
-    state: "WooCommerce / Shopify implemented",
+    examples: "ERPNext, WooCommerce, Shopify · Odoo in advanced setup",
+    state: "ERPNext read-only · WooCommerce / Shopify implemented",
     vendor: [
+      "ERPNext",
       "WooCommerce",
       "Shopify",
       "CACADUU Cloud",
@@ -876,6 +895,7 @@ function wizardPlatform() {
   if (wizardKind === "cloud_api")
     return (
       {
+        ERPNext: "erpnext",
         WooCommerce: "woocommerce",
         Shopify: "shopify",
         "CACADUU Cloud": "cacaduu",
@@ -885,10 +905,11 @@ function wizardPlatform() {
 }
 function wizardFields() {
   const platform = wizardPlatform(),
-    supportedCloud = ["woocommerce", "shopify"].includes(platform);
+    supportedCloud = ["erpnext", "woocommerce", "shopify"].includes(platform);
   const visible = {
     "wizard-endpoint-field":
-      wizardKind === "local_api" || platform === "woocommerce",
+      wizardKind === "local_api" ||
+      ["woocommerce", "erpnext"].includes(platform),
     "wizard-domain-field": platform === "shopify",
     "wizard-file-field": wizardKind === "file",
     "wizard-format-field": wizardKind === "file",
@@ -899,14 +920,16 @@ function wizardFields() {
     ].includes(wizardKind),
     "wizard-username-field": wizardKind === "local_api" || supportedCloud,
     "wizard-password-field":
-      wizardKind === "local_api" || platform === "woocommerce",
+      wizardKind === "local_api" ||
+      ["woocommerce", "erpnext"].includes(platform),
     "wizard-permission-field": supportedCloud,
   };
   Object.entries(visible).forEach(([id, show]) => ($(id).hidden = !show));
-  $("wizard-endpoint").placeholder =
-    platform === "woocommerce"
-      ? "https://store.example.com"
-      : "http://localhost:444/xml";
+  $("wizard-endpoint").placeholder = ["woocommerce", "erpnext"].includes(
+    platform,
+  )
+    ? "https://store.example.com"
+    : "http://localhost:444/xml";
   const method = integrationMethods.find((m) => m.id === wizardKind);
   $("wizard-config-help").textContent =
     platform === "file"
@@ -929,8 +952,9 @@ function wizardFields() {
       " " +
       regional.stockCaveat;
   $("wizard-preview").hidden = platform !== "file";
-  $("wizard-permission").disabled = !supportedCloud;
-  if (!supportedCloud) $("wizard-permission").value = "read";
+  $("wizard-permission").disabled = !supportedCloud || platform === "erpnext";
+  if (!supportedCloud || platform === "erpnext")
+    $("wizard-permission").value = "read";
 }
 function wizardDraft() {
   const name = $("wizard-name").value.trim(),
@@ -955,7 +979,7 @@ function wizardDraft() {
       throw new Error("Choose a CSV, XML or JSON inventory file.");
   } else if (wizardKind === "file")
     draft.setupPath = $("wizard-file").value.trim();
-  if (platform === "woocommerce") {
+  if (["woocommerce", "erpnext"].includes(platform)) {
     draft.baseUrl = $("wizard-endpoint").value.trim();
     if (!draft.baseUrl) throw new Error("Enter your store HTTPS URL.");
     draft.token = $("wizard-username").value;

@@ -81,7 +81,9 @@ export class UserError extends Error {}
 export function publicError(error: unknown): string {
   if (error instanceof UserError) return error.message;
   const message = error instanceof Error ? error.message : "";
-  const http = /^(WooCommerce|Shopify) HTTP (\d{3})$/.exec(message);
+  const http = /^(WooCommerce|Shopify|ERPNext|Odoo) HTTP (\d{3})$/.exec(
+    message,
+  );
   if (http)
     return `${http[1]} HTTP ${http[2]}: check credentials, permissions or service availability`;
   return "Operation failed. Check configuration, required mappings, credentials and source data. No inventory was assumed.";

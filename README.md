@@ -30,7 +30,7 @@ Keep the entire output folder together. Native `.node` files are unpacked from A
 ## Use the dashboard
 
 - **Overview:** connection/group counts and recent activity.
-- **POS Connections:** six integration-method cards (Cloud API, Local API/XML, File/Folder, Command-line, GUI Automation, Hardware/Database), searchable/filterable connection rows, and a four-step setup drawer: select type, configure, map products, test/save. CSV/XML/JSON and existing WooCommerce/Shopify adapters use real read tests; other vendor methods show setup-required status. Product and warehouse mapping templates are carried into the group editor. An unsaved file can be previewed without creating a connection. Username/password fields use encrypted credential storage and clear on save/cancel. The advanced connection form remains available. Tests never write inventory.
+- **POS Connections:** six integration-method cards (Cloud API, Local API/XML, File/Folder, Command-line, GUI Automation, Hardware/Database), searchable/filterable connection rows, and a four-step setup drawer: select type, configure, map products, test/save. CSV/XML/JSON, ERPNext, WooCommerce and Shopify adapters use real read tests; other vendor methods show setup-required status. Product and warehouse mapping templates are carried into the group editor. An unsaved file can be previewed without creating a connection. Username/password fields use encrypted credential storage and clear on save/cancel. The advanced connection form also supports read-only Odoo 18 setup. Tests never write inventory.
 - **Connection Groups:** master source or guarded two-way, explicit product and warehouse maps, per-member roles, intervals, enable/pause and manual Sync Now. The master must have source role. Map every observed item/warehouse: `local ID = shared ID` per line.
 - **Inventory Sync:** per-group Sync Now and persistent queue. Sync Now asks for confirmation because configured destinations may change. Schedules spread startup across the polling interval, wait for completion before scheduling another run, and resume after restart; there is no background Windows service. Pause/Resume works without editing the group, including when retry jobs are outstanding. Pausing retains jobs and prevents subsequent writes; a request already sent may finish.
 - **Products & Mapping:** inspect exact product/SKU/warehouse IDs (first 1,000 observations displayed), then edit group mappings.
@@ -68,6 +68,8 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 | Integration | Implemented | Remaining limits |
 |---|---|---|
 | CSV/XML/JSON | Strict reads, inspection, validated local export | Known schema only; no file watching or arbitrary vendor schema guessing |
+| ERPNext / Frappe v15 | Read-only paginated Bin stock with item/warehouse mapping | API key/secret and complete Bin read rights; whole units only; available unknown; no catalogue metadata for export; live staging pending |
+| Odoo 18 | Read-only internal-location quant aggregation and product SKU lookup | Legacy JSON-RPC, database/API entitlement/read rights required; whole units only; no catalogue metadata for export; live staging pending |
 | WooCommerce | Stock-managed product/variant reads, pagination, absolute quantity writes | Master only; no atomic revision check; no verified catalogue currency for export; sandbox/live validation remains |
 | Shopify | Paginated items and warehouses, `available` quantities, atomic `compareQuantity` writes | Admin API scopes required; API version 2026-07; sandbox/live validation remains; catalogue export metadata unavailable |
 | Shoptet | Setup-required forms/status | Merchant API/add-on authorization and verified endpoints not implemented |
@@ -77,6 +79,10 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 ## Slovakia, Czech Republic and Poland
 
 POS Connections includes 14 requested regional preparation profiles with country filtering. **Dotykačka and POHODA are prioritized first.** Portos, KROS OMEGA/ALFA, Money S3/S4, Storyous, Subiekt GT/nexo, PC-Market, Comarch Optima/POS and Profi Účtenka retain explicit access/schema requirements. These are not implemented native drivers. A normalized file can use the existing file driver after explicit conversion; vendor XML/DBF/XLSX is not assumed compatible. See [regional implementation priorities and documentation-access blocker](docs/REGIONAL_CONNECTORS.md).
+
+## Protocol and licence records
+
+See the [connector protocol and licence ledger](docs/CONNECTOR_PROTOCOLS_AND_LICENSES.md) for pinned ERPNext/Odoo source contracts, version boundaries, setup instructions and access requirements. `npm run licenses:report` regenerates the inventory of 91 locked dependency licence declarations. The application itself has no declared project licence; choose one before publishing a distributable. No proprietary vendor SDK is bundled or licence entitlement implied. Preserve packaged Electron/Chromium and module notices.
 
 ## Cloud compatibility
 

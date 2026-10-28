@@ -21,7 +21,8 @@
     "package:linux": "npm run build && node scripts/package-desktop.cjs linux",
     "test:packaged": "node scripts/test-electron.cjs --packaged",
     "test:scale": "npm run build && node --test tests/scale.test.cjs",
-    "test:electron:scale": "npm run build && npm run native:electron && node scripts/test-electron.cjs --scale"
+    "test:electron:scale": "npm run build && npm run native:electron && node scripts/test-electron.cjs --scale",
+    "licenses:report": "node scripts/license-report.cjs"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
