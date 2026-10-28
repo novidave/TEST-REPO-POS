@@ -1,1 +1,608 @@
-<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CACADUU POS Sync Agent</title><style>body{font:15px system-ui;margin:0;background:#f5f7fb;color:#142238}aside{position:fixed;inset:0 auto 0 0;width:220px;background:#111d34;color:white;padding:28px}main{margin-left:276px;padding:40px;max-width:800px}.panel{background:white;padding:25px;border:1px solid #e1e6ef;border-radius:14px;margin:18px 0}input,button{font:inherit;padding:12px;border-radius:8px;border:1px solid #ccd5e0;margin:5px}input{width:90%;max-width:460px}button{background:#1468ed;color:white;border:0;cursor:pointer}button:disabled{opacity:.5}small{color:#66758a}#result{white-space:pre-wrap}</style></head><body><aside><h2>CACADUU</h2><p>POS Sync Agent</p><hr><p>Overview</p><p>POS Connections</p><p>Inventory Sync</p><p>Products & Mapping</p><p>Logs</p><p>Settings</p></aside><main><h1>CACADUU Cloud Connection</h1><p>Optional destination. Local stock.csv + manifest remain the default delivery.</p><div class="panel"><h3>Pair with Môj obchod</h3><small>Paste the HTTPS Supabase connector function base URL</small><p><input id="url" placeholder="https://PROJECT.supabase.co/functions/v1/connector"></p><button id="save">Save URL</button><p><input id="code" placeholder="8-character pairing code"></p><p><input id="name" placeholder="Device name" value="Shop PC"></p><button id="pair">Pair device</button></div><div class="panel"><h3>Connection</h3><p id="state">Loading...</p><button id="status">Check status</button><button id="heartbeat">Send heartbeat</button><button id="rotate">Rotate credentials</button><button id="unpair">Forget local pairing</button><p><small>Forgetting a local pairing does not revoke the device on the website.</small></p></div><div class="panel"><h3>Inventory cloud upload / Sync Now</h3><p>Backend phases B and C are not yet available. Feature flags are off by default; 501 not_available is handled as an unavailable feature.</p></div><pre id="result" role="status"></pre></main><script src="./ui.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CACADUU Inventory Sync</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <aside>
+      <div class="brand">
+        <span class="brand-icon">C</span>
+        <div>CACADUU<small>INVENTORY WORKSPACE</small></div>
+      </div>
+      <nav aria-label="Main navigation">
+        <button data-page="overview" class="active">
+          ◈ <span>Overview</span></button
+        ><button data-page="connections">⇄ <span>POS Connections</span></button
+        ><button data-page="groups">▦ <span>Connection Groups</span></button
+        ><button data-page="sync">⟳ <span>Inventory Sync</span></button
+        ><button data-page="mapping">≡ <span>Products & Mapping</span></button
+        ><button data-page="history">◷ <span>Sync History & Logs</span></button
+        ><button data-page="settings">⚙ <span>Settings</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="dot"></span> Standalone desktop<small
+          >Cloud connection is optional</small
+        >
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <div class="eyebrow">YOUR INVENTORY, CONNECTED</div>
+          <h1 id="page-title">Overview</h1>
+        </div>
+        <button id="refresh" class="secondary">↻ Refresh</button>
+      </header>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="overview" class="view">
+        <div class="hero">
+          <div>
+            <span class="pill">LOCAL FIRST</span>
+            <h2>One workspace.<br />Every stock connection.</h2>
+            <p>
+              Map your products, choose a source, and keep inventory changes
+              under control.
+            </p>
+            <button id="get-started">Manage connections →</button>
+          </div>
+          <div class="hero-art" aria-hidden="true">▦ <span>⇄</span> ▦</div>
+        </div>
+        <div class="stats">
+          <article>
+            <small>Connections</small><strong id="stat-connections">0</strong
+            ><span>Configured destinations & sources</span>
+          </article>
+          <article>
+            <small>Enabled groups</small><strong id="stat-groups">0</strong
+            ><span>Scheduled while this app is open</span>
+          </article>
+          <article>
+            <small>Outstanding jobs</small><strong id="stat-jobs">0</strong
+            ><span>Pending or held for review</span>
+          </article>
+        </div>
+        <div class="panel">
+          <h2>Designed to fail safely</h2>
+          <p>
+            Explicit product and warehouse mappings are required. Conflicting
+            quantities are held for review. Read-only connections cannot receive
+            stock changes.
+          </p>
+          <p class="muted">
+            Local delivery: stock.csv + manifest.json. Complete, verified
+            catalogue data is required; invalid input preserves your previous
+            export.
+          </p>
+        </div>
+        <div class="panel">
+          <h2>Recent activity</h2>
+          <div id="recent"></div>
+        </div>
+      </section>
+      <section id="connections" class="view" hidden>
+        <div class="section-heading pos-heading">
+          <div>
+            <h2 class="sr-only">POS Connections</h2>
+            <p class="muted">
+              Connect your point of sale or inventory system. Choose the method
+              your software supports.
+            </p>
+          </div>
+          <div class="actions">
+            <button id="new-pos-connection">＋ Add POS Connection</button
+            ><button id="new-connection" class="secondary">
+              + Add connection
+            </button>
+          </div>
+        </div>
+        <div
+          id="integration-types"
+          class="integration-types"
+          aria-label="Integration methods"
+        ></div>
+        <div class="panel connection-panel">
+          <div class="connection-toolbar">
+            <h2>Your POS Connections</h2>
+            <label class="sr-only" for="connection-type-filter"
+              >Filter integration type</label
+            ><select id="connection-type-filter">
+              <option value="all">All types</option>
+              <option value="cloud_api">Cloud API</option>
+              <option value="local_api">Local API / XML</option>
+              <option value="file">File / Folder</option>
+              <option value="command_line">Command-line</option>
+              <option value="gui_automation">GUI Automation</option>
+              <option value="hardware_database">
+                Hardware / Database
+              </option></select
+            ><label class="sr-only" for="connection-search"
+              >Search connections</label
+            ><input
+              id="connection-search"
+              type="search"
+              placeholder="⌕  Search connections…"
+            />
+          </div>
+          <div id="connection-list" class="connection-rows"></div>
+        </div>
+        <details class="regional-support">
+          <summary>
+            Regional POS systems — Slovakia, Czech Republic &amp; Poland
+          </summary>
+          <p class="muted">
+            Requested integration priorities. Native drivers are setup required;
+            a compatible normalized file export can use the existing file
+            connector.
+          </p>
+          <label for="regional-country">Market</label
+          ><select id="regional-country">
+            <option value="all">All markets</option>
+            <option value="SK">Slovakia</option>
+            <option value="CZ">Czech Republic</option>
+            <option value="PL">Poland</option>
+          </select>
+          <div id="regional-connectors" class="card-grid"></div>
+        </details>
+        <details class="integration-help" open>
+          <summary>Which integration method should I choose?</summary>
+          <div id="integration-guides" class="integration-guides"></div>
+          <div class="automation-note">
+            <div>
+              <h3>
+                Is GUI automation a good option if the cash register is
+                connected?
+              </h3>
+              <p>
+                Connect to the inventory software directly through its API or a
+                verified file export whenever possible. GUI automation is a
+                fallback and is not implemented in this app.
+              </p>
+            </div>
+            <div>
+              <strong>Consider it only when</strong>
+              <p>
+                A supported export cannot be obtained through an API or
+                command-line tool, and automation would not interrupt the
+                cashier.
+              </p>
+              <strong>Prefer another method when</strong>
+              <p>
+                The device stores sales rather than full stock, the PC is often
+                locked, or frequent interface changes make clicks unreliable.
+              </p>
+            </div>
+          </div>
+        </details>
+        <form id="connection-form" class="panel" hidden>
+          <h2 id="connection-heading">Add connection</h2>
+          <input name="id" type="hidden" />
+          <div class="form-grid">
+            <label data-field="database"
+              >Odoo database<input name="database" /></label
+            ><label data-field="username"
+              >Odoo username<input
+                name="username"
+                type="password"
+                autocomplete="new-password" /></label
+            ><label data-field="password"
+              >Odoo API key<input
+                name="password"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+
+            <label
+              >Connection name<input
+                name="name"
+                required
+                maxlength="200"
+                placeholder="Warehouse or store name" /></label
+            ><label
+              >Platform<select name="platform">
+                <option value="file">CSV / XML / JSON file</option>
+                <option value="odoo">Odoo 18 — read only</option>
+                <option value="erpnext">
+                  ERPNext / Frappe v15 — read only
+                </option>
+                <option value="woocommerce">WooCommerce</option>
+                <option value="shopify">Shopify</option>
+                <option value="shoptet">Shoptet — setup required</option>
+                <option value="pos">Local POS — driver required</option>
+                <option value="cacaduu">CACADUU Cloud — optional</option>
+              </select></label
+            ><label data-field="baseUrl"
+              >Store HTTPS URL<input
+                name="baseUrl"
+                type="url"
+                placeholder="https://store.example.com" /></label
+            ><label data-field="shopDomain"
+              >Shop domain<input
+                name="shopDomain"
+                placeholder="store.myshopify.com" /></label
+            ><label data-field="stockPath"
+              >Inventory file path<input
+                name="stockPath"
+                placeholder="C:\Inventory\stock.csv"
+              /><button type="button" id="choose-file" class="secondary">
+                Choose file
+              </button></label
+            ><label data-field="token"
+              >API key / access token<input
+                name="token"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to keep stored credential" /></label
+            ><label data-field="secret"
+              >API secret<input
+                name="secret"
+                type="password"
+                autocomplete="new-password"
+                placeholder="Leave blank to keep stored credential" /></label
+            ><label
+              >Permission<select name="permission">
+                <option value="read">Read only</option>
+                <option value="read_write">
+                  Read & write (explicit consent)
+                </option>
+              </select></label
+            >
+          </div>
+          <p id="platform-help" class="hint"></p>
+          <p class="hint">
+            Credentials stay in OS encrypted storage and are never returned to
+            this page. A read test does not verify write access.
+          </p>
+          <button type="submit">Save connection</button
+          ><button type="button" id="cancel-connection" class="secondary">
+            Cancel
+          </button>
+        </form>
+      </section>
+      <section id="groups" class="view" hidden>
+        <div class="section-heading">
+          <div>
+            <h2>Connection groups</h2>
+            <p class="muted">
+              Choose authority, permissions, mappings and polling interval.
+            </p>
+          </div>
+          <button id="new-group">+ Create group</button>
+        </div>
+        <div id="group-list" class="card-grid"></div>
+        <form id="group-form" class="panel" hidden>
+          <h2>Configure group</h2>
+          <div class="form-grid">
+            <label
+              >Group ID<input
+                name="id"
+                required
+                pattern="[A-Za-z0-9_-]+"
+                placeholder="warehouse-to-store" /></label
+            ><label
+              >Mode<select name="mode">
+                <option value="master">Master source</option>
+                <option value="two_way">
+                  Two-way (atomic compare-and-swap required)
+                </option>
+              </select></label
+            ><label>Master source<select name="masterId"></select></label
+            ><label
+              >Interval (minutes)<input
+                name="intervalMinutes"
+                type="number"
+                min="1"
+                max="10080"
+                value="15"
+                required
+            /></label>
+          </div>
+          <label class="check"
+            ><input name="enabled" type="checkbox" />Enable scheduled sync and
+            manual Sync Now</label
+          >
+          <p class="hint">
+            Select at least two members. Master must have source role. Each
+            mapping line is <code>local ID = shared ID</code>. Every source item
+            and warehouse must be explicitly mapped. Two-way requires all
+            members to support atomic writes; WooCommerce and generic POS are
+            excluded.
+          </p>
+          <div id="group-members"></div>
+          <button type="submit">Save group</button
+          ><button id="cancel-group" type="button" class="secondary">
+            Cancel
+          </button>
+        </form>
+      </section>
+      <section id="sync" class="view" hidden>
+        <div class="panel">
+          <h2>Inventory synchronization</h2>
+          <p id="runtime-status" class="hint"></p>
+          <p>
+            Sync Now can update destinations with read/write permission. Review
+            mappings and test with sandbox stores first. Schedules run only
+            while this application remains open.
+          </p>
+          <p class="hint">
+            Failed atomic operations retry with backoff (up to five attempts).
+            Changed destinations and uncertain non-atomic writes are held. Held
+            jobs require reconciliation; automatic overwrite is never used to
+            resolve them.
+          </p>
+        </div>
+        <div id="sync-list" class="card-grid"></div>
+        <div class="panel">
+          <h2>Job queue</h2>
+          <div id="sync-jobs"></div>
+        </div>
+      </section>
+      <section id="mapping" class="view" hidden>
+        <div class="panel">
+          <h2>Inspect products & warehouses</h2>
+          <p class="muted">
+            Read the connection's inventory to discover exact IDs. No automatic
+            SKU or display-name matching.
+          </p>
+          <label>Connection<select id="inspect-connection"></select></label
+          ><button id="inspect">Read inventory</button
+          ><button id="edit-mappings" class="secondary">
+            Configure group mappings →
+          </button>
+          <p class="hint">
+            Up to 1,000 observations shown. Use explicit per-member product and
+            warehouse maps in Connection Groups.
+          </p>
+          <div id="inventory-table"></div>
+        </div>
+      </section>
+      <section id="history" class="view" hidden>
+        <div class="panel">
+          <h2>Sync history</h2>
+          <div id="history-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Conflict history</h2>
+          <p class="hint">
+            Historical conflict records are retained. Correct quantities at the
+            source after review; only agreement establishes a new two-way
+            baseline. Outstanding jobs must be reconciled separately.
+          </p>
+          <div id="conflict-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Persistent jobs</h2>
+          <div id="job-table"></div>
+        </div>
+      </section>
+      <section id="settings" class="view" hidden>
+        <div class="panel">
+          <h2>Connector support &amp; sync capacity</h2>
+          <p>
+            Connection count and vendor compatibility are separate. Each
+            configured connection uses one of the implemented drivers below;
+            setup-required methods cannot synchronize.
+          </p>
+          <p id="capacity-status" class="hint"></p>
+          <div id="connector-capabilities"></div>
+          <p class="hint">
+            Schedules spread startup across the polling interval and wait for
+            each run to finish. Increase intervals when provider limits or
+            inventory size make runs slow. Queue overflow is reported and
+            deferred to the next scheduled run.
+          </p>
+        </div>
+        <div class="panel">
+          <h2>Local workspace</h2>
+          <p>Default output: <strong>stock.csv + manifest.json</strong></p>
+          <p id="export-path" class="path"></p>
+          <p>
+            Local exports require source code, product name, price, currency and
+            quantity. Multi-warehouse exports require an explicit aggregation
+            policy and are held if product codes repeat.
+          </p>
+          <p id="secure-state"></p>
+          <p class="hint">
+            No telemetry or cloud account is required for local exports. Windows
+            credentials use Electron safeStorage / DPAPI under your Windows
+            account.
+          </p>
+        </div>
+        <div class="panel">
+          <span class="pill">OPTIONAL</span>
+          <h2>CACADUU Cloud Connection</h2>
+          <p>
+            Phase A: pairing, scheduled heartbeat, status and credential
+            rotation. Inventory upload and commands remain feature-gated and are
+            not part of local sync.
+          </p>
+          <label
+            >HTTPS pairing URL<input
+              id="url"
+              placeholder="https://PROJECT.supabase.co/functions/v1/connector" /></label
+          ><button id="save">Save URL</button>
+          <div class="form-grid">
+            <label
+              >Pairing code<input
+                id="code"
+                placeholder="K7QM-4WXP"
+                autocomplete="off" /></label
+            ><label
+              >Device name<input id="name" value="Shop PC" maxlength="100"
+            /></label>
+          </div>
+          <button id="pair">Pair device</button>
+          <p id="state">Not paired</p>
+          <div class="actions">
+            <button id="status" class="secondary">Check status</button
+            ><button id="heartbeat" class="secondary">Send heartbeat</button
+            ><button id="rotate" class="secondary">Rotate credentials</button
+            ><button id="unpair" class="secondary">Forget local pairing</button>
+          </div>
+          <p class="hint">
+            Forgetting local pairing does not revoke the device remotely. Use
+            Môj obchod to revoke it. HTTP 501 not_available does not disable
+            other destinations.
+          </p>
+        </div>
+      </section>
+    </main>
+    <dialog
+      id="pos-wizard"
+      class="pos-wizard"
+      aria-labelledby="pos-wizard-title"
+    >
+      <div class="wizard-header">
+        <div>
+          <div class="eyebrow">NEW INVENTORY CONNECTION</div>
+          <h2 id="pos-wizard-title">Add New POS Connection</h2>
+        </div>
+        <button
+          id="wizard-close"
+          class="icon-button secondary"
+          aria-label="Close setup wizard"
+        >
+          ×
+        </button>
+      </div>
+      <ol class="wizard-steps" aria-label="Setup progress">
+        <li data-step="1">Select Type</li>
+        <li data-step="2">Configure</li>
+        <li data-step="3">Map Products</li>
+        <li data-step="4">Test &amp; Save</li>
+      </ol>
+      <div id="wizard-notice" role="status" aria-live="polite" hidden></div>
+      <section class="wizard-page" data-wizard-step="1">
+        <h3>1. Select Integration Type</h3>
+        <p class="muted">
+          Start with an API or a verified export from the system that holds your
+          stock.
+        </p>
+        <div id="wizard-types" class="wizard-types"></div>
+      </section>
+      <section class="wizard-page" data-wizard-step="2" hidden>
+        <h3>2. Configure Connection</h3>
+        <div id="wizard-config-help" class="hint"></div>
+        <form id="wizard-config-form">
+          <label
+            >Connection name<input
+              id="wizard-name"
+              required
+              maxlength="200"
+              placeholder="e.g. Main shop inventory" /></label
+          ><label id="wizard-provider-field"
+            >Software / provider<select id="wizard-provider"></select></label
+          ><label id="wizard-format-field" hidden
+            >File format<select id="wizard-format">
+              <option value="supported">CSV / XML / JSON</option>
+              <option value="legacy">XLSX / DBF — setup required</option>
+            </select></label
+          ><label id="wizard-endpoint-field" hidden
+            >API endpoint<input
+              id="wizard-endpoint"
+              placeholder="http://localhost:444/xml"
+              autocomplete="off" /></label
+          ><label id="wizard-domain-field" hidden
+            >Shopify domain<input
+              id="wizard-domain"
+              placeholder="shop.myshopify.com"
+              autocomplete="off" /></label
+          ><label id="wizard-file-field" hidden
+            >File or export path<input
+              id="wizard-file"
+              placeholder="C:\Inventory\stock.csv"
+            /><button id="wizard-choose-file" type="button" class="secondary">
+              Choose file
+            </button></label
+          ><label id="wizard-setup-path-field" hidden
+            >Application / device reference<input
+              id="wizard-setup-path"
+              placeholder="Optional setup reference; nothing will be executed"
+          /></label>
+          <div class="form-grid">
+            <label id="wizard-username-field" hidden
+              >Username / API key<input
+                id="wizard-username"
+                type="password"
+                autocomplete="new-password" /></label
+            ><label id="wizard-password-field" hidden
+              >Password / API secret<input
+                id="wizard-password"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+          </div>
+          <label id="wizard-permission-field" hidden
+            >Permission<select id="wizard-permission">
+              <option value="read">Read only</option>
+              <option value="read_write">
+                Read &amp; write — explicit consent
+              </option>
+            </select></label
+          >
+        </form>
+        <p class="hint">
+          Credentials are encrypted using OS secure storage. Setup-required
+          methods never run commands, automate clicks, contact a POS device, or
+          execute database queries.
+        </p>
+      </section>
+      <section class="wizard-page" data-wizard-step="3" hidden>
+        <h3>3. Map Products &amp; Warehouses</h3>
+        <p class="muted">
+          Save explicit mapping templates, then assign this connection to a
+          group. This step does not enable synchronization.
+        </p>
+        <button id="wizard-preview" class="secondary">
+          Read sample inventory
+        </button>
+        <div id="wizard-inventory"></div>
+        <div class="form-grid">
+          <label
+            >Product IDs → shared product IDs<textarea
+              id="wizard-product-mappings"
+              placeholder="local-product = shared-product"
+            ></textarea></label
+          ><label
+            >Warehouse IDs → shared warehouse IDs<textarea
+              id="wizard-warehouse-mappings"
+              placeholder="local-warehouse = shared-warehouse"
+            ></textarea>
+          </label>
+        </div>
+        <p class="hint">
+          One pair per line: local ID = shared ID. No product names, quantities,
+          prices or currencies are filled in. Templates remain editable in
+          Connection Groups.
+        </p>
+      </section>
+      <section class="wizard-page" data-wizard-step="4" hidden>
+        <h3>4. Test &amp; Save</h3>
+        <div id="wizard-review" class="wizard-review"></div>
+        <p class="hint">
+          Supported tests read inventory only. A successful read does not verify
+          write access. Unsupported drivers are saved as setup required.
+        </p>
+        <button id="wizard-test" class="secondary">Test Connection</button>
+        <div
+          id="wizard-test-result"
+          class="wizard-test-result"
+          role="status"
+        ></div>
+      </section>
+      <footer class="wizard-footer">
+        <button id="wizard-back" class="secondary">Back</button
+        ><span id="wizard-step-label">Step 1 of 4</span
+        ><button id="wizard-next">Continue →</button
+        ><button id="wizard-save" hidden>Save connection</button>
+      </footer>
+    </dialog>
+    <script src="./ui.js"></script>
+  </body>
+</html>

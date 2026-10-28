@@ -1,0 +1,51 @@
+name: Desktop validation
+on:
+  pull_request:
+  push:
+    branches: [feature/universal-inventory-sync]
+permissions:
+  contents: read
+jobs:
+  core-and-electron:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run native:electron
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:electron:scale
+      - if: runner.os == 'Windows'
+        run: npm run test:electron:scale
+      - if: runner.os == 'Windows'
+        run: npm run package:win
+      - if: runner.os == 'Linux'
+        run: npm run package:linux
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:packaged
+      - if: runner.os == 'Windows'
+        run: npm run test:packaged
+      - if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CACADUU-Inventory-win32-x64
+          path: release/CACADUU-Inventory-win32-x64/
+          retention-days: 7
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ui

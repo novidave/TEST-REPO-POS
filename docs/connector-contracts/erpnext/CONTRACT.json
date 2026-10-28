@@ -1,0 +1,37 @@
+{
+  "driver": "erpnext",
+  "protocol": "Frappe v15 REST /api/resource/Bin, GET only",
+  "erpnext_commit": "4e0dce9ea8d351cd7023ad5ed66faf3cdec0680e",
+  "frappe_commit": "e7458ff33c8c1b81f812d521a17df790804eed6d",
+  "authentication": "Authorization: token <api-key>:<api-secret>; credentials encrypted by app vault",
+  "fields": [
+    "name",
+    "item_code",
+    "warehouse",
+    "actual_qty",
+    "stock_uom"
+  ],
+  "pagination": [
+    "limit_start",
+    "limit_page_length",
+    "order_by=name asc"
+  ],
+  "permissions": "Merchant API user must have complete read permission to required Bin/warehouse records. No write permissions required.",
+  "quantity": "actual_qty as onHand; available is unknown/null. Whole nonnegative units only. No price/currency inferred.",
+  "verification": "Official source contract inspected; mock tests; live staging pending. Other major versions unverified.",
+  "sources": {
+    "Bin schema": {
+      "sha256": "ed69b34a38a031bdee288dd4d6cd38f02617466804ac3d7903e86090173391de",
+      "url": "https://github.com/frappe/erpnext/blob/4e0dce9ea8d351cd7023ad5ed66faf3cdec0680e/erpnext/stock/doctype/bin/bin.json"
+    },
+    "Frappe REST routes": {
+      "sha256": "fee2b7523a88dfbf049fd352396815c3fdf47a6a1e4883345c9c1990ccb16ee5",
+      "url": "https://github.com/frappe/frappe/blob/e7458ff33c8c1b81f812d521a17df790804eed6d/frappe/api/v1.py"
+    },
+    "Frappe authentication": {
+      "sha256": "792e09201cb5f37ba649e3167254714e01804d2138f26137a912a4d729ec42ad",
+      "url": "https://github.com/frappe/frappe/blob/e7458ff33c8c1b81f812d521a17df790804eed6d/frappe/auth.py"
+    }
+  },
+  "licensing": "ERPNext server GPL-3.0; Frappe MIT. Exact license notices retained beside this record. No upstream implementation/schema is bundled; independently authored protocol client. Project license remains undeclared."
+}
