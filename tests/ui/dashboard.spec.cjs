@@ -25,6 +25,10 @@ async function open(page) {
         state: "authenticated_read_ok",
         count: 1,
       }),
+      setGroupEnabled: async (id, enabled) => {
+        data.groups.find((g) => g.id === id).enabled = enabled;
+        return { state: enabled ? "enabled" : "paused" };
+      },
       saveGroup: async (v) => {
         data.groups.push(v);
         return v;
@@ -170,6 +174,22 @@ test("group mappings, roles, schedule and manual sync flow", async ({
       .fill("main = canonical-warehouse");
   }
   await page.getByRole("button", { name: "Save group", exact: true }).click();
+  await expect(page.locator("#stat-groups")).toHaveText("1");
+  await page
+    .locator("#group-list")
+    .getByRole("button", { name: "Pause", exact: true })
+    .click();
+  await expect(page.locator("#stat-groups")).toHaveText("0");
+  await expect(
+    page
+      .locator("#group-list")
+      .getByRole("button", { name: "Sync Now", exact: true }),
+  ).toBeDisabled();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page
+    .locator("#group-list")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
   await expect(page.locator("#stat-groups")).toHaveText("1");
   const group = await page.evaluate(
     async () => (await window.desktop.snapshot()).groups[0],

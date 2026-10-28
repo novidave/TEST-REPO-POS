@@ -2,14 +2,20 @@ import type { SyncGroup } from "./types";
 import { planGroup, validateStock } from "./engine";
 import { SqliteSyncStore } from "./store";
 const active = new Set<string>();
-export async function runGroup(group: SyncGroup, store: SqliteSyncStore) {
+export async function runGroup(
+  group: SyncGroup,
+  store: SqliteSyncStore,
+  options: { canContinue?: () => boolean } = {},
+) {
+  const canContinue = () => group.enabled && (options.canContinue?.() ?? true);
   if (active.has(group.id)) throw new Error("Group sync is already running");
   active.add(group.id);
   try {
-    if (!group.enabled)
+    if (!canContinue())
       return {
         plan: { groupId: group.id, writes: [], conflicts: [], sourceCount: 0 },
         errors: [],
+        paused: true,
       };
     // Pending/blocked operations are reconciled before making a new plan.
     const plan =
@@ -28,6 +34,7 @@ export async function runGroup(group: SyncGroup, store: SqliteSyncStore) {
       )
         continue;
       for (const row of store.pending(group.id, adapter.id)) {
+        if (!canContinue()) return { plan, errors, paused: true };
         let attempted = false;
         try {
           if (group.mode === "master") {
@@ -126,6 +133,7 @@ export async function runGroup(group: SyncGroup, store: SqliteSyncStore) {
             );
             continue;
           }
+          if (!canContinue()) return { plan, errors, paused: true };
           // Persist an attempt BEFORE network IO so a crash cannot look like an unattempted write.
           store.attempt(row.id);
           attempted = true;
@@ -148,7 +156,7 @@ export async function runGroup(group: SyncGroup, store: SqliteSyncStore) {
         }
       }
     }
-    return { plan, errors };
+    return { plan, errors, paused: !canContinue() };
   } finally {
     active.delete(group.id);
   }

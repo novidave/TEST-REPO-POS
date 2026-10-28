@@ -29,6 +29,14 @@ let win: BrowserWindow | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
 let heartbeatInProgress = false;
 let cloudOperations: Promise<unknown> = Promise.resolve();
+let shuttingDown = false;
+function enqueueCloud<T>(operation: () => T | Promise<T>): Promise<T> {
+  if (shuttingDown)
+    return Promise.reject(new UserError("Application is closing"));
+  const result = cloudOperations.then(operation);
+  cloudOperations = result.catch(() => {});
+  return result;
+}
 const settingsPath = () => join(app.getPath("userData"), "cloud-settings.json");
 const save = () => atomicJson(settingsPath(), settings);
 function token(): string | null {
@@ -68,10 +76,10 @@ function connection() {
 }
 function scheduleHeartbeat(seconds: number) {
   clearTimeout(heartbeatTimer);
-  if (settings.tokenEncrypted)
+  if (settings.tokenEncrypted && !shuttingDown)
     heartbeatTimer = setTimeout(
       () => {
-        heartbeat().catch(() => {});
+        enqueueCloud(heartbeat).catch(() => {});
       },
       Math.max(15, Number.isFinite(seconds) ? seconds : 60) * 1000,
     );
@@ -131,9 +139,7 @@ async function setup() {
         throw new Error("Untrusted IPC sender");
       try {
         if (channel.startsWith("cloud:")) {
-          const operation = cloudOperations.then(() => handler(...args));
-          cloudOperations = operation.catch(() => {});
-          return await operation;
+          return await enqueueCloud(() => handler(...args));
         }
         return await handler(...args);
       } catch (e) {
@@ -167,6 +173,9 @@ async function setup() {
   handle("desktop:save-connection", (value) => service.saveConnection(value));
   handle("desktop:test-connection", (id) =>
     service.testConnection(string(id, 200)),
+  );
+  handle("desktop:set-group-enabled", (id, enabled) =>
+    service.setGroupEnabled(string(id, 200), enabled),
   );
   handle("desktop:save-group", (value) => service.saveGroup(value));
   handle("desktop:sync", (id) => service.sync(string(id, 200)));
@@ -298,14 +307,19 @@ app.on("activate", () => {
 });
 app.on("window-all-closed", () => app.quit());
 let quitting = false;
+let quitReady = false;
 app.on("before-quit", (event) => {
   clearTimeout(heartbeatTimer);
-  if (service && !quitting) {
+  shuttingDown = true;
+  if (service && !quitReady) {
     event.preventDefault();
+    if (quitting) return;
     quitting = true;
-    void service
-      .close()
-      .then(() => app.quit())
+    void Promise.all([service.close(), cloudOperations])
+      .then(() => {
+        quitReady = true;
+        app.quit();
+      })
       .catch(() => app.exit(1));
   }
 });

@@ -45,6 +45,37 @@ export class DesktopService {
     this.store = new SqliteSyncStore(join(directory, "inventory.db"));
     this.scheduler = new SyncScheduler(this.store);
   }
+  private mutations: Promise<unknown> = Promise.resolve();
+  private editing = false;
+  private shutdown?: Promise<void>;
+  private async track<T>(action: () => Promise<T>): Promise<T> {
+    if (this.closing) throw new UserError("Application is closing");
+    this.active++;
+    try {
+      return await action();
+    } finally {
+      this.active--;
+      if (!this.active) this.idle.splice(0).forEach((resolve) => resolve());
+    }
+  }
+  private mutate<T>(action: () => Promise<T>): Promise<T> {
+    return this.track(async () => {
+      const operation = this.mutations.then(async () => {
+        if (this.busy.size)
+          throw new UserError(
+            "Wait for active sync before editing configuration",
+          );
+        this.editing = true;
+        try {
+          return await action();
+        } finally {
+          this.editing = false;
+        }
+      });
+      this.mutations = operation.catch(() => {});
+      return operation;
+    });
+  }
   connections(): DesktopConnection[] {
     return (
       this.store.db
@@ -68,6 +99,11 @@ export class DesktopService {
   }
   snapshot() {
     return {
+      outstandingJobs: (
+        this.store.db
+          .prepare("SELECT COUNT(*) count FROM outbox WHERE state!='done'")
+          .get() as { count: number }
+      ).count,
       connections: this.connections(),
       groups: this.groups(),
       history: this.store.db
@@ -75,7 +111,7 @@ export class DesktopService {
         .all(),
       jobs: this.store.db
         .prepare(
-          "SELECT id,group_id,destination,product_key,location,quantity,state,attempts,last_error FROM outbox ORDER BY created_at DESC LIMIT 100",
+          "SELECT id,group_id,destination,product_key,location,quantity,state,attempts,last_error FROM outbox ORDER BY (state!='done') DESC,created_at DESC LIMIT 100",
         )
         .all(),
       conflicts: this.store.db
@@ -86,7 +122,10 @@ export class DesktopService {
       exportDirectory: join(this.directory, "exports"),
     };
   }
-  async saveConnection(input: unknown) {
+  saveConnection(input: unknown) {
+    return this.mutate(() => this.saveConnectionNow(input));
+  }
+  private async saveConnectionNow(input: unknown) {
     if (!input || typeof input !== "object")
       throw new UserError("Connection required");
     const value = input as Record<string, unknown>;
@@ -130,6 +169,33 @@ export class DesktopService {
     if (platform === "file")
       c.stockPath = text(value.stockPath, "Inventory path", 4096);
     const previous = this.connections().find((x) => x.id === id);
+    if (
+      previous &&
+      ((platform === "woocommerce" && previous.baseUrl !== c.baseUrl) ||
+        (platform === "shopify" && previous.shopDomain !== c.shopDomain))
+    )
+      throw new UserError(
+        "Create a new connection to change the store endpoint; existing credentials and jobs stay with the original store",
+      );
+    const affected = this.groups().filter((g) =>
+      g.members.some((m) => m.connectionId === id),
+    );
+    if (
+      previous &&
+      previous.stockPath !== c.stockPath &&
+      affected.some((g) => this.store.hasOutstanding(g.id))
+    )
+      throw new UserError(
+        "Reconcile outstanding jobs before changing the source file",
+      );
+    if (
+      previous &&
+      previous.permission !== c.permission &&
+      affected.some((g) => g.enabled)
+    )
+      throw new UserError(
+        "Pause affected groups before changing connection permission",
+      );
     if (previous && previous.platform !== platform)
       throw new UserError("Create a new connection to change platform");
     // Never persist arbitrary renderer properties, tokens, or passwords with public config.
@@ -142,12 +208,24 @@ export class DesktopService {
         secret: secret || existing.secret || "",
       });
     }
-    this.store.db
-      .prepare(
-        "INSERT INTO connections(id,platform,config_json,created_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json",
-      )
-      .run(id, platform, JSON.stringify(c), new Date().toISOString());
-    this.log("connection_saved", { id, platform });
+    this.store.transaction(() => {
+      if (previous && previous.stockPath !== c.stockPath) {
+        for (const group of affected) {
+          this.store.db
+            .prepare("DELETE FROM observations WHERE group_id=?")
+            .run(group.id);
+          this.store.db
+            .prepare("DELETE FROM conflict_holds WHERE group_id=?")
+            .run(group.id);
+        }
+      }
+      this.store.db
+        .prepare(
+          "INSERT INTO connections(id,platform,config_json,created_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET config_json=excluded.config_json",
+        )
+        .run(id, platform, JSON.stringify(c), new Date().toISOString());
+      this.log("connection_saved", { id, platform });
+    });
     await this.restartSchedules();
     return c;
   }
@@ -188,7 +266,10 @@ export class DesktopService {
     }
     return adapter;
   }
-  async testConnection(id: string) {
+  testConnection(id: string) {
+    return this.track(() => this.testConnectionNow(id));
+  }
+  private async testConnectionNow(id: string) {
     const c = this.connections().find((c) => c.id === id);
     if (!c) throw new UserError("Unknown connection");
     if (["pos", "shoptet", "cacaduu"].includes(c.platform))
@@ -202,26 +283,77 @@ export class DesktopService {
     try {
       const rows = await (await this.adapter(id)).read();
       validateStock(rows);
-      c.status = "authenticated_read_ok";
-      this.updateStatus(c);
+      if (!this.updateStatus(c, "authenticated_read_ok"))
+        return {
+          state: "not_tested",
+          message: "Connection changed during test; run the test again",
+        };
       return {
-        state: c.status,
+        state: "authenticated_read_ok",
         count: rows.length,
         message: "Read validated. Write permission has not been tested.",
       };
     } catch (e) {
-      c.status = "error";
-      this.updateStatus(c);
+      this.updateStatus(c, "error");
       return { state: "error", message: publicError(e) };
     }
   }
-  private updateStatus(c: DesktopConnection) {
-    this.store.db
-      .prepare("UPDATE connections SET config_json=? WHERE id=?")
-      .run(JSON.stringify(c), c.id);
-    this.log("connection_test", { id: c.id, status: c.status });
+  private updateStatus(expected: DesktopConnection, status: string): boolean {
+    const result = this.store.db
+      .prepare(
+        "UPDATE connections SET config_json=json_set(config_json,'$.status',?) WHERE id=? AND config_json=?",
+      )
+      .run(status, expected.id, JSON.stringify(expected));
+    if (result.changes)
+      this.log("connection_test", { id: expected.id, status });
+    return result.changes > 0;
   }
-  async saveGroup(input: unknown) {
+  setGroupEnabled(id: string, enabled: unknown) {
+    if (this.closing) throw new UserError("Application is closing");
+    if (this.editing)
+      throw new UserError("Configuration update in progress; retry afterwards");
+    if (typeof enabled !== "boolean")
+      throw new UserError("Enabled must be a boolean");
+    if (enabled && this.busy.has(id))
+      throw new UserError(
+        "Wait for the previous sync to finish before resuming",
+      );
+    const group = this.groups().find((g) => g.id === id);
+    if (!group) throw new UserError("Unknown group");
+    if (enabled) {
+      const connections = this.connections();
+      for (const member of group.members) {
+        const connection = connections.find(
+          (c) => c.id === member.connectionId,
+        );
+        if (
+          !connection ||
+          (member.role !== "source" && connection.permission !== "read_write")
+        )
+          throw new UserError(
+            "Review member permissions before resuming this group",
+          );
+      }
+    }
+    group.enabled = enabled;
+    this.store.transaction(() => {
+      this.store.db
+        .prepare("UPDATE sync_groups SET enabled=?,config_json=? WHERE id=?")
+        .run(enabled ? 1 : 0, JSON.stringify(group), id);
+      this.log(enabled ? "group_resumed" : "group_paused", { id });
+    });
+    void this.restartSchedules();
+    return {
+      state: enabled ? "enabled" : "paused",
+      message: enabled
+        ? "Scheduled and manual synchronization enabled"
+        : "Paused; queued jobs retained. A remote request already sent may still complete.",
+    };
+  }
+  saveGroup(input: unknown) {
+    return this.mutate(() => this.saveGroupNow(input));
+  }
+  private async saveGroupNow(input: unknown) {
     if (!input || typeof input !== "object")
       throw new UserError("Group required");
     const v = input as GroupConfig;
@@ -309,19 +441,38 @@ export class DesktopService {
       enabled: v.enabled,
       intervalMinutes: v.intervalMinutes,
     };
-    this.store.db
-      .prepare(
-        "INSERT INTO sync_groups VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,master_id=excluded.master_id,interval_minutes=excluded.interval_minutes,enabled=excluded.enabled,config_json=excluded.config_json",
-      )
-      .run(
-        id,
-        g.mode,
-        g.masterId ?? null,
-        g.intervalMinutes,
-        g.enabled ? 1 : 0,
-        JSON.stringify(g),
-      );
-    this.log("group_saved", { id, enabled: g.enabled });
+    const previous = this.groups().find((existing) => existing.id === id);
+    const structure = (value: GroupConfig) =>
+      JSON.stringify({
+        mode: value.mode,
+        masterId: value.masterId,
+        members: value.members,
+        mappings: value.mappings,
+        locationMappings: value.locationMappings,
+      });
+    this.store.transaction(() => {
+      if (previous && structure(previous) !== structure(g)) {
+        this.store.db
+          .prepare("DELETE FROM observations WHERE group_id=?")
+          .run(id);
+        this.store.db
+          .prepare("DELETE FROM conflict_holds WHERE group_id=?")
+          .run(id);
+      }
+      this.store.db
+        .prepare(
+          "INSERT INTO sync_groups VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,master_id=excluded.master_id,interval_minutes=excluded.interval_minutes,enabled=excluded.enabled,config_json=excluded.config_json",
+        )
+        .run(
+          id,
+          g.mode,
+          g.masterId ?? null,
+          g.intervalMinutes,
+          g.enabled ? 1 : 0,
+          JSON.stringify(g),
+        );
+      this.log("group_saved", { id, enabled: g.enabled });
+    });
     await this.restartSchedules();
     return g;
   }
@@ -338,6 +489,10 @@ export class DesktopService {
   }
   async sync(id: string) {
     if (this.closing) throw new UserError("Application is closing");
+    if (this.editing)
+      throw new UserError(
+        "Configuration update in progress; retry sync afterwards",
+      );
     if (this.busy.has(id)) throw new UserError("Group already running");
     this.busy.add(id);
     this.active++;
@@ -366,8 +521,12 @@ export class DesktopService {
           exportState = "validation_failed_previous_export_preserved";
         }
       }
-      const result = await runGroup(g, this.store);
-      this.log("sync_completed", {
+      const result = await runGroup(g, this.store, {
+        canContinue: () =>
+          !this.closing &&
+          Boolean(this.groups().find((group) => group.id === id)?.enabled),
+      });
+      this.log(result.paused ? "sync_paused" : "sync_completed", {
         id,
         exportState,
         sourceCount: result.plan.sourceCount,
@@ -403,7 +562,10 @@ export class DesktopService {
         "No remote write performed. Review stock and run a fresh plan; two-way requires a new agreed baseline.",
     };
   }
-  async exportLocal(id: string) {
+  exportLocal(id: string) {
+    return this.track(() => this.exportLocalNow(id));
+  }
+  private async exportLocalNow(id: string) {
     const rows = await (await this.adapter(id)).read();
     validateStock(rows);
     if (rows.some((r) => !r.product))
@@ -416,7 +578,10 @@ export class DesktopService {
     this.log("local_export_completed", { id, count: rows.length });
     return { state: "ok", count: rows.length };
   }
-  async inspect(id: string) {
+  inspect(id: string) {
+    return this.track(() => this.inspectNow(id));
+  }
+  private async inspectNow(id: string) {
     const rows = await (await this.adapter(id)).read();
     validateStock(rows);
     return rows
@@ -432,6 +597,7 @@ export class DesktopService {
   async restartSchedules() {
     this.timers.forEach(clearInterval);
     this.timers = [];
+    if (this.closing) return;
     for (const g of this.groups().filter((g) => g.enabled))
       this.timers.push(
         setInterval(() => {
@@ -439,12 +605,16 @@ export class DesktopService {
         }, g.intervalMinutes * 60000),
       );
   }
-  async close() {
+  close(): Promise<void> {
+    if (this.shutdown) return this.shutdown;
     this.closing = true;
     this.timers.forEach(clearInterval);
     this.scheduler.stopAll();
-    if (this.active)
-      await new Promise<void>((resolve) => this.idle.push(resolve));
-    this.store.close();
+    this.shutdown = (async () => {
+      if (this.active)
+        await new Promise<void>((resolve) => this.idle.push(resolve));
+      this.store.close();
+    })();
+    return this.shutdown;
   }
 }

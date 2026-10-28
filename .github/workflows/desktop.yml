@@ -26,6 +26,18 @@ jobs:
         run: npm run test:electron
       - if: runner.os == 'Windows'
         run: npm run package:win
+      - if: runner.os == 'Linux'
+        run: npm run package:linux
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:packaged
+      - if: runner.os == 'Windows'
+        run: npm run test:packaged
+      - if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CACADUU-Inventory-win32-x64
+          path: release/CACADUU-Inventory-win32-x64/
+          retention-days: 7
   dashboard:
     runs-on: ubuntu-latest
     steps:

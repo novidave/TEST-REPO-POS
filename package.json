@@ -17,7 +17,9 @@
     "native:rebuild:electron": "electron-rebuild -f -w better-sqlite3",
     "test:electron": "npm run build && npm run native:electron && node scripts/test-electron.cjs",
     "format:check": "prettier --check src ui tests scripts package.json tsconfig.json playwright.config.cjs .github/workflows/desktop.yml",
-    "package:win": "npm run build && node scripts/package-win.cjs"
+    "package:win": "npm run build && node scripts/package-desktop.cjs win32",
+    "package:linux": "npm run build && node scripts/package-desktop.cjs linux",
+    "test:packaged": "node scripts/test-electron.cjs --packaged"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

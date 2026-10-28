@@ -189,3 +189,239 @@ test("held job dismissal is explicit, clears baseline, and never performs remote
   assert.equal(service.store.hasOutstanding("g"), false);
   assert.equal(service.store.previous("g", "a", "p\0w"), undefined);
 });
+test("store endpoint edits cannot redirect encrypted credentials or queued inventory jobs", async (t) => {
+  const { service } = await fixture(t);
+  for (const platform of ["woocommerce", "shopify"]) {
+    const initial = {
+      id: platform,
+      name: "Original store",
+      platform,
+      permission: "read_write",
+      ...(platform === "woocommerce"
+        ? {
+            baseUrl: "https://original.test",
+            token: "private-token",
+            secret: "private-secret",
+          }
+        : { shopDomain: "original.myshopify.com", token: "private-token" }),
+    };
+    await service.saveConnection(initial);
+    await assert.rejects(
+      service.saveConnection({
+        ...initial,
+        ...(platform === "woocommerce"
+          ? { baseUrl: "https://other.test" }
+          : { shopDomain: "other.myshopify.com" }),
+      }),
+      /new connection/,
+    );
+    const saved = service.connections().find((c) => c.id === platform);
+    assert.equal(
+      saved.baseUrl ?? saved.shopDomain,
+      initial.baseUrl ?? initial.shopDomain,
+    );
+  }
+});
+test("pause works with pending jobs, preserves queue, and persists across restart", async (t) => {
+  const { service, dir } = await fixture(t);
+  const g = {
+    id: "pause",
+    mode: "master",
+    masterId: "a",
+    members: [
+      { connectionId: "a", role: "source" },
+      { connectionId: "b", role: "destination" },
+    ],
+    enabled: true,
+    intervalMinutes: 1,
+    mappings: {},
+    locationMappings: {},
+  };
+  service.store.db
+    .prepare("INSERT INTO sync_groups VALUES(?,?,?,?,?,?)")
+    .run(g.id, g.mode, g.masterId, 1, 1, JSON.stringify(g));
+  service.store.enqueue("pause", "b", {
+    productKey: "p",
+    location: "w",
+    quantity: 2,
+    expectedRevision: "1",
+    operationId: "pending",
+  });
+  assert.equal(service.setGroupEnabled("pause", false).state, "paused");
+  assert.equal(service.groups()[0].enabled, false);
+  assert.equal(service.store.hasOutstanding("pause"), true);
+  await assert.rejects(service.sync("pause"), /Enable/);
+  assert.equal(
+    service.store.db.prepare("SELECT state FROM outbox").get().state,
+    "pending",
+  );
+  assert.throws(() => service.setGroupEnabled("pause", "false"), /boolean/);
+  await service.close();
+  const { SqliteSyncStore } = require("../dist/src/sync/store.js");
+  const reopened = new SqliteSyncStore(join(dir, "inventory.db"));
+  try {
+    assert.equal(
+      JSON.parse(
+        reopened.db.prepare("SELECT config_json FROM sync_groups").get()
+          .config_json,
+      ).enabled,
+      false,
+    );
+    assert.equal(reopened.hasOutstanding("pause"), true);
+  } finally {
+    reopened.close();
+  }
+});
+test("shutdown waits for in-flight reads and rejects new operations", async (t) => {
+  const { service } = await fixture(t);
+  let release;
+  service.adapter = async () => ({
+    read: async () => {
+      await new Promise((resolve) => (release = resolve));
+      return [
+        {
+          productKey: "p",
+          sku: "p",
+          location: "w",
+          available: 1,
+          onHand: 1,
+          observedAt: new Date().toISOString(),
+        },
+      ];
+    },
+  });
+  const reading = service.inspect("test");
+  await new Promise((resolve) => setImmediate(resolve));
+  let closed = false;
+  const closing = service.close().then(() => (closed = true));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closed, false);
+  await assert.rejects(service.inspect("test"), /closing/);
+  release();
+  assert.equal((await reading)[0].quantity, 1);
+  await closing;
+  assert.equal(closed, true);
+  await service.close();
+});
+test("configuration edits block new sync until credential persistence completes", async (t) => {
+  const { service } = await fixture(t);
+  let release;
+  let signal;
+  const started = new Promise((resolve) => (signal = resolve));
+  service.vault.set = async () =>
+    new Promise((resolve) => {
+      release = resolve;
+      signal();
+    });
+  const saving = service.saveConnection({
+    id: "store",
+    name: "Shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  await started;
+  assert.equal(typeof release, "function");
+  await assert.rejects(service.sync("g"), /Configuration update/);
+  release();
+  await saving;
+});
+test("connection read tests cannot overwrite concurrent configuration edits", async (t) => {
+  const { service } = await fixture(t);
+  const c = await service.saveConnection({
+    id: "file",
+    name: "Old",
+    platform: "file",
+    stockPath: "old.csv",
+    permission: "read",
+  });
+  let release;
+  service.adapter = async () => ({
+    read: async () => {
+      await new Promise((resolve) => (release = resolve));
+      return [
+        {
+          productKey: "p",
+          sku: "p",
+          location: "w",
+          available: 1,
+          onHand: 1,
+          observedAt: new Date().toISOString(),
+        },
+      ];
+    },
+  });
+  const testing = service.testConnection(c.id);
+  await new Promise((resolve) => setImmediate(resolve));
+  await service.saveConnection({ ...c, name: "New", stockPath: "new.csv" });
+  release();
+  const result = await testing;
+  assert.equal(result.state, "not_tested");
+  assert.equal(service.connections()[0].name, "New");
+  assert.equal(service.connections()[0].stockPath, "new.csv");
+});
+test("dashboard counts outstanding jobs beyond its 100-row history view", async (t) => {
+  const { service } = await fixture(t);
+  for (let i = 0; i < 105; i++)
+    service.store.enqueue("g", "b", {
+      productKey: "p" + i,
+      location: "w",
+      quantity: 1,
+      operationId: "job-" + i,
+    });
+  const snapshot = service.snapshot();
+  assert.equal(snapshot.jobs.length, 100);
+  assert.equal(snapshot.outstandingJobs, 105);
+});
+test("mapping/source identity changes clear stale baselines while interval changes preserve them", async (t) => {
+  const { service } = await fixture(t);
+  const a = await service.saveConnection({
+    id: "a",
+    name: "Source",
+    platform: "file",
+    stockPath: "source.csv",
+    permission: "read",
+  });
+  const b = await service.saveConnection({
+    id: "b",
+    name: "Shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  const g = {
+    id: "mapped",
+    mode: "master",
+    masterId: a.id,
+    members: [
+      { connectionId: a.id, role: "source" },
+      { connectionId: b.id, role: "destination" },
+    ],
+    enabled: false,
+    intervalMinutes: 1,
+    mappings: { a: { p: "shared" }, b: { p: "shared" } },
+    locationMappings: { a: { w: "shared" }, b: { w: "shared" } },
+  };
+  await service.saveGroup(g);
+  const row = {
+    productKey: "p",
+    sku: "p",
+    location: "w",
+    available: 2,
+    onHand: 2,
+    observedAt: new Date().toISOString(),
+  };
+  service.store.saveObservation(g.id, "a", row);
+  await service.saveGroup({ ...g, intervalMinutes: 5 });
+  assert.equal(service.store.previous(g.id, "a", "p\0w"), 2);
+  await service.saveGroup({
+    ...g,
+    mappings: { a: { p: "new" }, b: { p: "new" } },
+  });
+  assert.equal(service.store.previous(g.id, "a", "p\0w"), undefined);
+  service.store.saveObservation(g.id, "a", row);
+  await service.saveConnection({ ...a, stockPath: "other-source.csv" });
+  assert.equal(service.store.previous(g.id, "a", "p\0w"), undefined);
+});

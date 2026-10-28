@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 const desktop = {
+  setGroupEnabled: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke("desktop:set-group-enabled", id, enabled),
   dismissJob: (id: string) => ipcRenderer.invoke("desktop:dismiss-job", id),
   export: (id: string) => ipcRenderer.invoke("desktop:export", id),
   chooseFile: () => ipcRenderer.invoke("desktop:choose-file"),

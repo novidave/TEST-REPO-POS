@@ -125,9 +125,9 @@ function render() {
   $("stat-groups").textContent = snapshot.groups.filter(
     (g) => g.enabled,
   ).length;
-  $("stat-jobs").textContent = snapshot.jobs.filter(
-    (j) => j.state !== "done",
-  ).length;
+  $("stat-jobs").textContent =
+    snapshot.outstandingJobs ??
+    snapshot.jobs.filter((j) => j.state !== "done").length;
   $("export-path").textContent =
     snapshot.exportDirectory + " / <group or connection ID>";
   const list = $("connection-list");
@@ -221,7 +221,19 @@ function render() {
         false,
       );
       sync.disabled = !g.enabled;
-      actions.append(sync);
+      actions.append(
+        sync,
+        button(g.enabled ? "Pause" : "Resume", async () => {
+          if (
+            !g.enabled &&
+            !window.confirm(
+              "Resume this group? Scheduled synchronization may update configured destinations.",
+            )
+          )
+            return;
+          return window.desktop.setGroupEnabled(g.id, !g.enabled);
+        }),
+      );
       card.append(actions);
       target.append(card);
     }
@@ -312,6 +324,8 @@ function editConnection(c) {
   ])
     if (c[key] !== undefined) cf.elements[key].value = c[key];
   cf.elements.platform.disabled = true;
+  cf.elements.baseUrl.readOnly = true;
+  cf.elements.shopDomain.readOnly = true;
   cf.hidden = false;
   $("connection-heading").textContent = "Edit connection";
   platformFields();
@@ -320,6 +334,8 @@ $("new-connection").onclick = () => {
   cf.reset();
   cf.elements.id.value = "";
   cf.elements.platform.disabled = false;
+  cf.elements.baseUrl.readOnly = false;
+  cf.elements.shopDomain.readOnly = false;
   cf.hidden = false;
   $("connection-heading").textContent = "Add connection";
   platformFields();

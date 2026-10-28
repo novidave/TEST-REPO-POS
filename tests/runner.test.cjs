@@ -288,3 +288,46 @@ test("established two-way conflict remains latched after restart and a peer reve
   assert.equal(r.plan.conflicts.length, 0);
   assert.equal(f.store.isHeld("g", "p", "w"), false);
 });
+test("pausing during preflight preserves pending jobs without issuing a remote write", async (t) => {
+  const f = fixture(t);
+  let enabled = true;
+  let reads = 0;
+  f.b.read = async () => {
+    reads++;
+    if (reads === 2) enabled = false;
+    return [row(3)];
+  };
+  const result = await runGroup(f.g, f.store, { canContinue: () => enabled });
+  assert.equal(result.paused, true);
+  assert.equal(f.calls.length, 0);
+  const pending = f.store.db.prepare("SELECT state,attempts FROM outbox").get();
+  assert.deepEqual(pending, { state: "pending", attempts: 0 });
+  enabled = true;
+  f.b.read = async () => [row(3)];
+  await runGroup(f.g, f.store, { canContinue: () => enabled });
+  assert.equal(f.calls.length, 1);
+});
+test("pausing during a sent write stops subsequent jobs and retains their operation IDs", async (t) => {
+  const f = fixture(t);
+  let enabled = true;
+  f.g.members[0].adapter.read = async () => [
+    row(5),
+    { ...row(5), productKey: "p2", sku: "SKU2" },
+  ];
+  f.b.read = async () => [row(3), { ...row(3), productKey: "p2", sku: "SKU2" }];
+  f.g.mappings.a.p2 = "p2";
+  f.g.mappings.b.p2 = "p2";
+  f.b.write = async (updates) => {
+    f.calls.push(updates);
+    enabled = false;
+  };
+  const result = await runGroup(f.g, f.store, { canContinue: () => enabled });
+  assert.equal(result.paused, true);
+  assert.equal(f.calls.length, 1);
+  assert.equal(
+    f.store.db
+      .prepare("SELECT COUNT(*) count FROM outbox WHERE state='pending'")
+      .get().count,
+    1,
+  );
+});
