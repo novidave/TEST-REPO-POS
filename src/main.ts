@@ -23,7 +23,7 @@ async function setup() {
   ipcMain.handle("cloud:rotate", async () => { const result = await connection().rotate(); await storeToken(result.device_token); return { rotated: true }; });
   ipcMain.handle("cloud:unpair-local", async () => { delete settings.tokenEncrypted; delete settings.deviceId; delete settings.shopName; await save(); });
   const win = new BrowserWindow({ width: 1080, height: 760, webPreferences: { preload: join(__dirname, "preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: false } });
-  await win.loadFile(join(__dirname, "../ui/index.html"));
+  await win.loadFile(join(__dirname, "../../ui/index.html"));
 }
 app.whenReady().then(setup).catch(console.error);
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
