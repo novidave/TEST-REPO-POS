@@ -695,3 +695,194 @@ test("read-only ERP drivers reject write permissions and bind encrypted credenti
     /private-/,
   );
 });
+const mappedCsv = {
+  version: 1,
+  delimiter: ";",
+  encoding: "utf-8",
+  decimalSeparator: ",",
+  quantityKind: "on_hand",
+  columns: {
+    source_code: "Code",
+    quantity: "Qty",
+    warehouse: "Warehouse",
+    observed_at: "Time",
+  },
+};
+test("mapped imports preview without saving, persist exact metadata and refuse invalid platform settings", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "regional.csv");
+  await writeFile(
+    path,
+    "Code;Qty;Warehouse;Time\n001;4,00;main;2026-10-28T12:00:00Z",
+  );
+  assert.equal(
+    (await service.previewFile(path, mappedCsv)).rows[0].quantity,
+    4,
+  );
+  assert.equal(service.connections().length, 0);
+  const input = {
+    name: "Regional export",
+    platform: "file",
+    stockPath: path,
+    permission: "read",
+    csvImport: mappedCsv,
+    regionalVendorId: "money_s3",
+  };
+  const c = await service.saveConnection(input);
+  assert.deepEqual(service.connections()[0].csvImport, mappedCsv);
+  assert.equal(
+    (await service.testConnection(c.id)).state,
+    "authenticated_read_ok",
+  );
+  await assert.rejects(service.exportLocal(c.id), /catalogue/);
+  await assert.rejects(
+    service.saveConnection({ ...input, stockPath: "source.xml" }),
+    /CSV file/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...input, platform: "pos" }),
+    /file connection/,
+  );
+  const cleared = await service.saveConnection({
+    ...input,
+    id: c.id,
+    csvImport: null,
+  });
+  assert.equal(cleared.csvImport, undefined);
+});
+test("import profile edits reject outstanding jobs and clear source baselines after reconciliation", async (t) => {
+  const { service } = await fixture(t);
+  const a = await service.saveConnection({
+    id: "a",
+    name: "File",
+    platform: "file",
+    stockPath: "stock.csv",
+    permission: "read",
+    csvImport: mappedCsv,
+  });
+  await service.saveConnection({
+    id: "b",
+    name: "Shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  await service.saveGroup({
+    id: "g",
+    mode: "master",
+    masterId: "a",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "a", role: "source" },
+      { connectionId: "b", role: "destination" },
+    ],
+    mappings: { a: { p: "P" }, b: { p: "P" } },
+    locationMappings: { a: { w: "W" }, b: { w: "W" } },
+  });
+  service.store.saveObservation("g", "a", {
+    productKey: "p",
+    sku: "p",
+    location: "w",
+    available: 2,
+    onHand: null,
+    observedAt: new Date().toISOString(),
+  });
+  const changed = {
+    ...a,
+    csvImport: { ...mappedCsv, quantityKind: "available" },
+  };
+  service.store.enqueue("g", "b", {
+    productKey: "p",
+    location: "w",
+    quantity: 2,
+    operationId: "csv-pending",
+  });
+  await assert.rejects(
+    service.saveConnection(changed),
+    /Reconcile outstanding jobs/,
+  );
+  assert.equal(service.store.previous("g", "a", "p\0w"), 2);
+  service.store.db.prepare("DELETE FROM outbox WHERE group_id=?").run("g");
+  await service.saveConnection(changed);
+  assert.equal(service.store.previous("g", "a", "p\0w"), undefined);
+});
+test("mapped stock-only master sync reaches mock destination despite independent local export validation failure", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "stock.csv");
+  await writeFile(
+    path,
+    "Code;Qty;Warehouse;Time\n001;4;main;2026-10-28T12:00:00Z",
+  );
+  const a = await service.saveConnection({
+    id: "a",
+    name: "File",
+    platform: "file",
+    stockPath: path,
+    permission: "read",
+    csvImport: mappedCsv,
+  });
+  await service.saveConnection({
+    id: "b",
+    name: "Mock shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  const original = service.adapter.bind(service);
+  let quantity = 0,
+    writes = 0;
+  service.adapter = async (id) =>
+    id === "a"
+      ? original(id)
+      : {
+          id: "b",
+          platform: "shopify",
+          capabilities: {
+            read: true,
+            write: true,
+            locations: true,
+            webhooks: false,
+            compareAndSwap: true,
+          },
+          read: async () => [
+            {
+              productKey: "remote",
+              sku: "001",
+              location: "warehouse",
+              available: quantity,
+              onHand: null,
+              revision: String(quantity),
+              observedAt: new Date().toISOString(),
+            },
+          ],
+          write: async (updates) => {
+            assert.equal(updates[0].quantity, 4);
+            quantity = 4;
+            writes++;
+          },
+        };
+  await service.saveGroup({
+    id: "csv-master",
+    mode: "master",
+    masterId: a.id,
+    enabled: true,
+    intervalMinutes: 1440,
+    members: [
+      { connectionId: "a", role: "source" },
+      { connectionId: "b", role: "destination" },
+    ],
+    mappings: { a: { "001": "shared" }, b: { remote: "shared" } },
+    locationMappings: { a: { main: "shared" }, b: { warehouse: "shared" } },
+  });
+  const result = await service.sync("csv-master");
+  assert.equal(writes, 1);
+  assert.equal(quantity, 4);
+  assert.equal(
+    result.exportState,
+    "validation_failed_previous_export_preserved",
+  );
+  assert.deepEqual(result.errors, []);
+});

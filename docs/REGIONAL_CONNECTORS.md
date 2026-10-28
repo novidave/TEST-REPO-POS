@@ -28,7 +28,7 @@ These priorities come from the user's requested market list. They are not indepe
 
 - Country filtering and vendor-specific preparation are available in POS Connections.
 - A regional profile can be saved as inert POS setup metadata. It cannot join a sync group as a readable/writable native connection.
-- A user may explicitly choose a file source for a regional vendor. Only already-normalized, complete CSV/XML/JSON handover data is accepted; this uses the existing file driver, not a new vendor parser.
+- A user may explicitly choose a file source for a regional vendor. Standard complete CSV/XML/JSON handover data is accepted. Alternatively, explicit CSV import profiles can map actual headers, separators, decimal format and text encoding; see [CSV import profiles](CSV_IMPORT_PROFILES.md). This extends the file driver, not a native vendor parser; units/quantity meaning and complete stock scope must be verified.
 - Setup-required tests report required access/schema work. They do not issue vendor requests or claim a successful connection.
 - Credentials entered for a prepared local API remain in encrypted OS storage; no token/password is stored in public metadata or logs. No Sfera license values or merchant credentials are requested in chat.
 - Product/warehouse mapping templates remain explicit. No names, prices, currencies, quantities, units or missing stock are invented.

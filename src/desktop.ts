@@ -1,3 +1,4 @@
+import { validateCsvImport, type CsvImportProfile } from "./sync/csv-import";
 import { OdooAdapter } from "./sync/adapters/odoo";
 import { ErpNextAdapter } from "./sync/adapters/erpnext";
 import { regionalConnectors, regionalConnector } from "./regional-connectors";
@@ -29,6 +30,7 @@ export interface DesktopConnection {
   database?: string;
   shopDomain?: string;
   stockPath?: string;
+  csvImport?: CsvImportProfile;
   permission: "read" | "read_write";
   status: string;
   integrationKind?:
@@ -231,6 +233,19 @@ export class DesktopService {
     if (platform === "file")
       c.stockPath = text(value.stockPath, "Inventory path", 4096);
     const previous = this.connections().find((x) => x.id === id);
+    const csvImport =
+      value.csvImport === undefined ? previous?.csvImport : value.csvImport;
+    if (csvImport != null) {
+      if (platform !== "file")
+        throw new UserError("CSV import settings require a file connection");
+      c.csvImport = validateCsvImport(csvImport);
+      if (!c.stockPath?.toLowerCase().endsWith(".csv"))
+        throw new UserError("Mapped import settings require a CSV file");
+    }
+    const fileChanged =
+      previous &&
+      (previous.stockPath !== c.stockPath ||
+        JSON.stringify(previous.csvImport) !== JSON.stringify(c.csvImport));
     if (
       previous &&
       ((["odoo", "woocommerce", "erpnext"].includes(platform) &&
@@ -324,13 +339,9 @@ export class DesktopService {
     const affected = this.groups().filter((g) =>
       g.members.some((m) => m.connectionId === id),
     );
-    if (
-      previous &&
-      previous.stockPath !== c.stockPath &&
-      affected.some((g) => this.store.hasOutstanding(g.id))
-    )
+    if (fileChanged && affected.some((g) => this.store.hasOutstanding(g.id)))
       throw new UserError(
-        "Reconcile outstanding jobs before changing the source file",
+        "Reconcile outstanding jobs before changing the source file or import settings",
       );
     if (
       previous &&
@@ -358,7 +369,7 @@ export class DesktopService {
       });
     }
     this.store.transaction(() => {
-      if (previous && previous.stockPath !== c.stockPath) {
+      if (fileChanged) {
         for (const group of affected) {
           this.store.db
             .prepare("DELETE FROM observations WHERE group_id=?")
@@ -385,7 +396,7 @@ export class DesktopService {
     let adapter: InventoryAdapter;
     switch (c.platform) {
       case "file":
-        adapter = new FileInventoryAdapter(c.id, c.stockPath!);
+        adapter = new FileInventoryAdapter(c.id, c.stockPath!, c.csvImport);
         break;
       case "odoo":
         adapter = new OdooAdapter(
@@ -767,11 +778,12 @@ export class DesktopService {
     this.log("local_export_completed", { id, count: rows.length });
     return { state: "ok", count: rows.length };
   }
-  previewFile(path: unknown) {
+  previewFile(path: unknown, csvImport?: unknown) {
     return this.track(async () => {
       const rows = await new FileInventoryAdapter(
         "preview",
         text(path, "File path", 4096),
+        csvImport == null ? undefined : validateCsvImport(csvImport),
       ).read();
       validateStock(rows);
       return {

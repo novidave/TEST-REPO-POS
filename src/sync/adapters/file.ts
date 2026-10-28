@@ -1,10 +1,37 @@
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
+import { UserError } from "../../security";
+import {
+  validateCsvImport,
+  csvNumber,
+  type CsvImportProfile,
+} from "../csv-import";
 import { extname } from "node:path";
 import { parse } from "csv-parse/sync";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { stockCsv, type StockRow } from "../../export";
 import { validateStock } from "../engine";
 import type { InventoryAdapter, Stock } from "../types";
+const maxBytes = 16 * 1024 * 1024;
+async function boundedBytes(path: string): Promise<Buffer> {
+  const file = await open(path, "r");
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const chunk = Buffer.alloc(64 * 1024);
+      const { bytesRead } = await file.read(chunk, 0, chunk.length, null);
+      if (!bytesRead) return Buffer.concat(chunks, total);
+      total += bytesRead;
+      if (total > maxBytes)
+        throw new UserError(
+          "Inventory file exceeds 16 MiB; split the export explicitly",
+        );
+      chunks.push(chunk.subarray(0, bytesRead));
+    }
+  } finally {
+    await file.close();
+  }
+}
 function number(value: unknown): number {
   if (
     (typeof value !== "number" && typeof value !== "string") ||
@@ -23,16 +50,46 @@ export class FileInventoryAdapter implements InventoryAdapter {
     webhooks: false,
     compareAndSwap: false,
   };
+  private readonly csvImport?: CsvImportProfile;
   constructor(
     readonly id: string,
     private readonly path: string,
-  ) {}
+    csvImport?: CsvImportProfile,
+  ) {
+    if (csvImport !== undefined) this.csvImport = validateCsvImport(csvImport);
+  }
   async read(): Promise<Stock[]> {
-    const text = await readFile(this.path, "utf8");
+    const bytes = await boundedBytes(this.path);
+    const text = new TextDecoder(this.csvImport?.encoding ?? "utf-8", {
+      fatal: true,
+    }).decode(bytes);
     let raw: unknown;
     const extension = extname(this.path).toLowerCase();
+    if (this.csvImport && extension !== ".csv")
+      throw new UserError("Mapped import settings require a CSV file");
     if (extension === ".csv")
-      raw = parse(text, { columns: true, bom: true, skip_empty_lines: true });
+      raw = parse(text, {
+        delimiter: this.csvImport?.delimiter ?? ",",
+        columns: (headers: string[]) => {
+          if (
+            headers.some((h) => !h.trim()) ||
+            new Set(headers).size !== headers.length
+          )
+            throw new UserError("CSV headers must be nonempty and unique");
+          if (
+            this.csvImport &&
+            Object.values(this.csvImport.columns).some(
+              (h) => !headers.includes(h),
+            )
+          )
+            throw new UserError(
+              "A mapped CSV column is missing; check the saved profile against the export",
+            );
+          return headers;
+        },
+        bom: true,
+        skip_empty_lines: true,
+      });
     else if (extension === ".xml") {
       if (
         /<!DOCTYPE|<!ENTITY/i.test(text) ||
@@ -49,9 +106,50 @@ export class FileInventoryAdapter implements InventoryAdapter {
     } else if (extension === ".json") raw = JSON.parse(text);
     else throw new Error("Supported inventory files: CSV, XML or JSON");
     if (!Array.isArray(raw)) throw new Error("Expected inventory rows");
+    if (raw.length > 100000)
+      throw new UserError(
+        "Inventory exceeds 100000 rows; split the export explicitly",
+      );
     const rows: Stock[] = raw.map((v: unknown) => {
       if (!v || typeof v !== "object") throw new Error("Invalid stock row");
-      const r = v as Record<string, unknown>;
+      let r = v as Record<string, unknown>;
+      if (this.csvImport) {
+        const profile = this.csvImport,
+          source = r;
+        r = Object.fromEntries(
+          Object.entries(profile.columns).map(([target, header]) => [
+            target,
+            source[header],
+          ]),
+        );
+        if (
+          typeof r.observed_at !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+            r.observed_at,
+          )
+        )
+          throw new UserError(
+            "Mapped CSV timestamps require ISO 8601 with an explicit timezone",
+          );
+        r.quantity = csvNumber(r.quantity, profile.decimalSeparator);
+        if (profile.columns.price)
+          r.price = csvNumber(r.price, profile.decimalSeparator);
+        if (!profile.columns.name)
+          return {
+            productKey: String(r.source_code ?? ""),
+            sku: String(r.source_code ?? ""),
+            location: String(r.warehouse ?? ""),
+            onHand:
+              profile.quantityKind === "on_hand"
+                ? (r.quantity as number)
+                : null,
+            available:
+              profile.quantityKind === "available"
+                ? (r.quantity as number)
+                : null,
+            observedAt: typeof r.observed_at === "string" ? r.observed_at : "",
+          };
+      }
       if ("productKey" in r) return r as unknown as Stock;
       const product: StockRow = {
         source_code: String(r.source_code ?? ""),
@@ -66,8 +164,12 @@ export class FileInventoryAdapter implements InventoryAdapter {
         productKey: product.source_code,
         sku: product.source_code,
         location: String(r.warehouse ?? ""),
-        onHand: product.quantity,
-        available: product.quantity,
+        onHand:
+          this.csvImport?.quantityKind === "available"
+            ? null
+            : product.quantity,
+        available:
+          this.csvImport?.quantityKind === "on_hand" ? null : product.quantity,
         observedAt: typeof r.observed_at === "string" ? r.observed_at : "",
         product,
       };

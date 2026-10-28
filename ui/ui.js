@@ -283,11 +283,57 @@ function render() {
   snapshot.connections.forEach((c) => option(select, c.id, c.name));
   if ([...select.options].some((o) => o.value === old)) select.value = old;
 }
+function readCsvProfile(prefix = "") {
+  if ($(prefix + "csv-mode").value !== "mapped") return null;
+  const columns = {};
+  for (const line of $(prefix + "csv-columns")
+    .value.split(/\r?\n/)
+    .filter((l) => l.trim())) {
+    const index = line.indexOf("="),
+      key = line.slice(0, index).trim(),
+      header = line.slice(index + 1).trim();
+    if (index < 1 || !header || Object.hasOwn(columns, key))
+      throw new Error("Use one unique field = exact header mapping per line.");
+    Object.defineProperty(columns, key, { value: header, enumerable: true });
+  }
+  if (!$(prefix + "csv-quantity-kind").value)
+    throw new Error(
+      "Choose whether the source quantity is on hand or available to sell.",
+    );
+  return {
+    version: 1,
+    columns,
+    delimiter:
+      $(prefix + "csv-delimiter").value === "tab"
+        ? "\t"
+        : $(prefix + "csv-delimiter").value,
+    encoding: $(prefix + "csv-encoding").value,
+    decimalSeparator: $(prefix + "csv-decimal").value,
+    quantityKind: $(prefix + "csv-quantity-kind").value,
+  };
+}
+function setCsvProfile(prefix, profile) {
+  $(prefix + "csv-mode").value = profile ? "mapped" : "standard";
+  $(prefix + "csv-delimiter").value =
+    profile?.delimiter === "\t" ? "tab" : (profile?.delimiter ?? ",");
+  $(prefix + "csv-encoding").value = profile?.encoding ?? "utf-8";
+  $(prefix + "csv-decimal").value = profile?.decimalSeparator ?? ".";
+  $(prefix + "csv-quantity-kind").value = profile?.quantityKind ?? "";
+  $(prefix + "csv-columns").value = Object.entries(profile?.columns ?? {})
+    .map(([k, v]) => k + " = " + v)
+    .join("\n");
+  $(prefix + "csv-options").hidden = !profile;
+}
+for (const prefix of ["", "wizard-"])
+  $(prefix + "csv-mode").onchange = () => {
+    $(prefix + "csv-options").hidden =
+      $(prefix + "csv-mode").value !== "mapped";
+  };
 const cf = $("connection-form");
 function platformFields() {
   const platform = cf.elements.platform.value;
   const visible = {
-    file: ["stockPath"],
+    file: ["stockPath", "csvImport"],
     odoo: ["baseUrl", "database", "username", "password"],
     erpnext: ["baseUrl", "token", "secret"],
     woocommerce: ["baseUrl", "token", "secret"],
@@ -327,6 +373,7 @@ function platformFields() {
 }
 function editConnection(c) {
   cf.reset();
+  setCsvProfile("", c.csvImport);
   for (const key of [
     "id",
     "name",
@@ -348,6 +395,7 @@ function editConnection(c) {
 }
 $("new-connection").onclick = () => {
   cf.reset();
+  setCsvProfile("", null);
   cf.elements.id.value = "";
   cf.elements.platform.disabled = false;
   cf.elements.database.readOnly = false;
@@ -362,6 +410,18 @@ $("cancel-connection").onclick = () => {
   cf.reset();
   cf.hidden = true;
 };
+$("preview-import").onclick = () =>
+  run(async () => {
+    const result = await window.desktop.previewFile(
+      cf.elements.stockPath.value,
+      readCsvProfile(),
+    );
+    return (
+      "Validated " +
+      result.count +
+      " stock rows. Preview only; no connection saved or export written."
+    );
+  });
 $("choose-file").onclick = () =>
   run(async () => {
     const path = await window.desktop.chooseFile();
@@ -387,6 +447,7 @@ cf.onsubmit = (e) => {
     ])
       data[key] = cf.elements[key].value;
     try {
+      if (data.platform === "file") data.csvImport = readCsvProfile();
       await window.desktop.saveConnection(data);
       cf.hidden = true;
       return "Connection saved. Run a read test before configuring synchronization.";
@@ -855,6 +916,7 @@ function wizardNotice(message) {
 }
 function openPosWizard(kind = "local_api") {
   $("wizard-config-form").reset();
+  setCsvProfile("wizard-", null);
   $("wizard-product-mappings").value = "";
   $("wizard-warehouse-mappings").value = "";
   $("wizard-inventory").replaceChildren();
@@ -913,6 +975,7 @@ function wizardFields() {
     "wizard-domain-field": platform === "shopify",
     "wizard-file-field": wizardKind === "file",
     "wizard-format-field": wizardKind === "file",
+    "wizard-csv-import": platform === "file",
     "wizard-setup-path-field": [
       "command_line",
       "gui_automation",
@@ -946,7 +1009,7 @@ function wizardFields() {
   if (regional)
     $("wizard-config-help").textContent =
       (platform === "file"
-        ? "Normalized file source only. Native vendor exports require explicit conversion to the documented handover schema. "
+        ? "File source only. Choose standard handover or explicitly map your CSV columns and format. Native APIs and vendor XML/DBF/XLSX parsers remain setup required. "
         : "Native driver is setup required. ") +
       regional.access +
       " " +
@@ -975,6 +1038,7 @@ function wizardDraft() {
   };
   if (platform === "file") {
     draft.stockPath = $("wizard-file").value.trim();
+    draft.csvImport = readCsvProfile("wizard-");
     if (!draft.stockPath)
       throw new Error("Choose a CSV, XML or JSON inventory file.");
   } else if (wizardKind === "file")
@@ -1081,6 +1145,7 @@ async function wizardAction(action) {
 async function previewWizardFile() {
   const preview = await window.desktop.previewFile(
     $("wizard-file").value.trim(),
+    readCsvProfile("wizard-"),
   );
   table(
     "wizard-inventory",

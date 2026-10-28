@@ -11,7 +11,7 @@ const { join, resolve } = require("node:path");
     const input = join(profile, "sample.csv");
     await writeFile(
       input,
-      "source_code,name,price,currency,quantity,warehouse,observed_at\nTEST-1,Test fixture only,12,EUR,3,test-warehouse,2026-10-28T12:00:00Z\n",
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;12,50;EUR;3;test-warehouse;2026-10-28T12:00:00Z\n",
     );
     const packaged = process.argv.includes("--packaged");
     const scale = process.argv.includes("--scale");
@@ -41,6 +41,15 @@ const { join, resolve } = require("node:path");
     await page.locator("#wizard-next").click();
     await page.locator("#wizard-name").fill("Fixture file");
     await page.locator("#wizard-file").fill(input);
+    await page.locator("#wizard-csv-mode").selectOption("mapped");
+    await page.locator("#wizard-csv-delimiter").selectOption(";");
+    await page.locator("#wizard-csv-decimal").selectOption(",");
+    await page.locator("#wizard-csv-quantity-kind").selectOption("on_hand");
+    await page
+      .locator("#wizard-csv-columns")
+      .fill(
+        "source_code = Kód\nname = Názov\nprice = Cena\ncurrency = Mena\nquantity = Počet\nwarehouse = Sklad\nobserved_at = Čas",
+      );
     await page.locator("#wizard-next").click();
     await page.locator("#wizard-preview").click();
     await page.waitForFunction(() =>
@@ -83,6 +92,8 @@ const { join, resolve } = require("node:path");
     );
     const id = state.connections[0].id;
     assert.equal(state.connections[0].integrationKind, "file");
+    assert.equal(state.connections[0].csvImport.columns.source_code, "Kód");
+    assert.equal(state.connections[0].csvImport.quantityKind, "on_hand");
     assert.deepEqual(state.connections[0].productMappings, {
       "TEST-1": "shared-test-product",
     });
@@ -94,7 +105,7 @@ const { join, resolve } = require("node:path");
     assert.match(before, /Test fixture only/);
     await writeFile(
       input,
-      "source_code,name,price,currency,quantity,warehouse,observed_at\nTEST-1,Test fixture only,,EUR,3,test-warehouse,2026-10-28T12:00:00Z\n",
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;;EUR;3;test-warehouse;2026-10-28T12:00:00Z\n",
     );
     await page.getByRole("button", { name: "Export locally" }).click();
     await page.waitForFunction(() =>
@@ -204,6 +215,10 @@ const { join, resolve } = require("node:path");
     assert.equal(restored.connections.length, expectedConnections);
     assert.equal(restored.connections[0].id, id);
     assert.equal(restored.connections[0].status, "authenticated_read_ok");
+    assert.deepEqual(
+      restored.connections[0].csvImport,
+      state.connections[0].csvImport,
+    );
     console.log((packaged ? "Packaged" : "Source") + " profile restart passed");
     console.log(
       "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, invalid-data preservation, sandbox and context isolation",

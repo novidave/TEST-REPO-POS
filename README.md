@@ -67,7 +67,7 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 
 | Integration | Implemented | Remaining limits |
 |---|---|---|
-| CSV/XML/JSON | Strict reads, inspection, validated local export | Known schema only; no file watching or arbitrary vendor schema guessing |
+| CSV/XML/JSON | Strict reads, inspection, validated local export | Standard handover or explicit mapped CSV profiles; no file watching, XLSX/DBF or vendor schema guessing |
 | ERPNext / Frappe v15 | Read-only paginated Bin stock with item/warehouse mapping | API key/secret and complete Bin read rights; whole units only; available unknown; no catalogue metadata for export; live staging pending |
 | Odoo 18 | Read-only internal-location quant aggregation and product SKU lookup | Legacy JSON-RPC, database/API entitlement/read rights required; whole units only; no catalogue metadata for export; live staging pending |
 | WooCommerce | Stock-managed product/variant reads, pagination, absolute quantity writes | Master only; no atomic revision check; no verified catalogue currency for export; sandbox/live validation remains |
@@ -79,6 +79,10 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 ## Slovakia, Czech Republic and Poland
 
 POS Connections includes 14 requested regional preparation profiles with country filtering. **Dotykačka and POHODA are prioritized first.** Portos, KROS OMEGA/ALFA, Money S3/S4, Storyous, Subiekt GT/nexo, PC-Market, Comarch Optima/POS and Profi Účtenka retain explicit access/schema requirements. These are not implemented native drivers. A normalized file can use the existing file driver after explicit conversion; vendor XML/DBF/XLSX is not assumed compatible. See [regional implementation priorities and documentation-access blocker](docs/REGIONAL_CONNECTORS.md).
+
+## Regional CSV exports
+
+The file connector now supports saved explicit CSV profiles: exact column mapping, comma/semicolon/tab/pipe separators, UTF-8 or Windows-1250/1252, decimal point/comma, and declared on-hand versus available stock. Configure this in the POS wizard or advanced form and preview before saving. Stock-only imports can synchronize but preserve the previous local export until verified catalogue metadata is supplied. See [setup, CLI example and validation limits](docs/CSV_IMPORT_PROFILES.md). This does not add native vendor API drivers or assume arbitrary vendor exports are compatible.
 
 ## Protocol and licence records
 

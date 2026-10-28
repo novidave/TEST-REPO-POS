@@ -183,6 +183,66 @@
         <form id="connection-form" class="panel" hidden>
           <h2 id="connection-heading">Add connection</h2>
           <input name="id" type="hidden" />
+          <fieldset data-field="csvImport">
+            <legend>CSV import format</legend>
+            <label
+              >Import mode<select id="csv-mode">
+                <option value="standard">Standard handover schema</option>
+                <option value="mapped">
+                  Explicit column mapping (CSV only)
+                </option>
+              </select></label
+            >
+            <div id="csv-options" hidden>
+              <div class="form-grid">
+                <label
+                  >Column separator<select id="csv-delimiter">
+                    <option value=",">Comma</option>
+                    <option value=";">Semicolon</option>
+                    <option value="tab">Tab</option>
+                    <option value="|">Pipe</option>
+                  </select></label
+                >
+                <label
+                  >Text encoding<select id="csv-encoding">
+                    <option value="utf-8">UTF-8</option>
+                    <option value="windows-1250">
+                      Windows-1250 (Central Europe)
+                    </option>
+                    <option value="windows-1252">Windows-1252</option>
+                  </select></label
+                >
+                <label
+                  >Decimal separator<select id="csv-decimal">
+                    <option value=".">Point</option>
+                    <option value=",">Comma</option>
+                  </select></label
+                >
+                <label
+                  >Quantity means<select id="csv-quantity-kind">
+                    <option value="">Choose the source meaning</option>
+                    <option value="on_hand">On hand</option>
+                    <option value="available">Available to sell</option>
+                  </select></label
+                >
+              </div>
+              <label
+                >Column mappings<textarea
+                  id="csv-columns"
+                  rows="8"
+                  placeholder="source_code = SKU column&#10;quantity = Quantity column&#10;warehouse = Warehouse column&#10;observed_at = Timestamp column"
+                ></textarea>
+              </label>
+              <p class="muted">
+                Use exact export headers. Required: source_code, quantity,
+                warehouse, observed_at (timestamp with timezone). Optional:
+                name, price and currency together; ean. Whole units only. Match
+                quantity meaning and units to the destination; no reservation or
+                unit conversion. Stock-only imports can sync but cannot create
+                stock.csv without verified catalogue data.
+              </p>
+            </div>
+          </fieldset>
           <div class="form-grid">
             <label data-field="database"
               >Odoo database<input name="database" /></label
@@ -230,7 +290,9 @@
               >Inventory file path<input
                 name="stockPath"
                 placeholder="C:\Inventory\stock.csv"
-              /><button type="button" id="choose-file" class="secondary">
+              /><button type="button" id="preview-import" class="secondary">
+                Preview import</button
+              ><button type="button" id="choose-file" class="secondary">
                 Choose file
               </button></label
             ><label data-field="token"
@@ -490,6 +552,66 @@
         <h3>2. Configure Connection</h3>
         <div id="wizard-config-help" class="hint"></div>
         <form id="wizard-config-form">
+          <fieldset id="wizard-csv-import" hidden>
+            <legend>CSV import format</legend>
+            <label
+              >Import mode<select id="wizard-csv-mode">
+                <option value="standard">Standard handover schema</option>
+                <option value="mapped">
+                  Explicit column mapping (CSV only)
+                </option>
+              </select></label
+            >
+            <div id="wizard-csv-options" hidden>
+              <div class="form-grid">
+                <label
+                  >Column separator<select id="wizard-csv-delimiter">
+                    <option value=",">Comma</option>
+                    <option value=";">Semicolon</option>
+                    <option value="tab">Tab</option>
+                    <option value="|">Pipe</option>
+                  </select></label
+                >
+                <label
+                  >Text encoding<select id="wizard-csv-encoding">
+                    <option value="utf-8">UTF-8</option>
+                    <option value="windows-1250">
+                      Windows-1250 (Central Europe)
+                    </option>
+                    <option value="windows-1252">Windows-1252</option>
+                  </select></label
+                >
+                <label
+                  >Decimal separator<select id="wizard-csv-decimal">
+                    <option value=".">Point</option>
+                    <option value=",">Comma</option>
+                  </select></label
+                >
+                <label
+                  >Quantity means<select id="wizard-csv-quantity-kind">
+                    <option value="">Choose the source meaning</option>
+                    <option value="on_hand">On hand</option>
+                    <option value="available">Available to sell</option>
+                  </select></label
+                >
+              </div>
+              <label
+                >Column mappings<textarea
+                  id="wizard-csv-columns"
+                  rows="8"
+                  placeholder="source_code = SKU column&#10;quantity = Quantity column&#10;warehouse = Warehouse column&#10;observed_at = Timestamp column"
+                ></textarea>
+              </label>
+              <p class="muted">
+                Use exact export headers. Required: source_code, quantity,
+                warehouse, observed_at (timestamp with timezone). Optional:
+                name, price and currency together; ean. Whole units only. Match
+                quantity meaning and units to the destination; no reservation or
+                unit conversion. Stock-only imports can sync but cannot create
+                stock.csv without verified catalogue data.
+              </p>
+            </div>
+          </fieldset>
           <label
             >Connection name<input
               id="wizard-name"

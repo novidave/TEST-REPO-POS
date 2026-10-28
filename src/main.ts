@@ -179,7 +179,9 @@ async function setup() {
   );
   handle("desktop:save-group", (value) => service.saveGroup(value));
   handle("desktop:sync", (id) => service.sync(string(id, 200)));
-  handle("desktop:preview-file", (path) => service.previewFile(path));
+  handle("desktop:preview-file", (path, csvImport) =>
+    service.previewFile(path, csvImport),
+  );
   handle("desktop:inspect", (id) => service.inspect(string(id, 200)));
   handle("cloud:config", () => ({
     apiBaseUrl: settings.apiBaseUrl,

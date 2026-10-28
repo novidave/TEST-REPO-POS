@@ -74,12 +74,20 @@ async function open(page) {
         data.groups.push(v);
         return v;
       },
-      previewFile: async () => ({
-        count: 1,
-        rows: [
-          { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
-        ],
-      }),
+      previewFile: async (path, csvImport) => {
+        data.lastPreview = { path, csvImport };
+        return {
+          count: 1,
+          rows: [
+            {
+              productKey: "SKU-A",
+              sku: "SKU-A",
+              location: "main",
+              quantity: 2,
+            },
+          ],
+        };
+      },
       inspect: async () => [
         { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
       ],
@@ -472,4 +480,74 @@ test("ERPNext and Odoo setup stays read-only and clears authentication fields", 
       "private-",
     );
   }
+});
+test("advanced CSV profile previews explicit mappings and restores them when editing", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="name"]').fill("Regional mapped export");
+  await page.locator('[name="stockPath"]').fill("regional.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.locator("#csv-encoding").selectOption("windows-1250");
+  await page.locator("#csv-decimal").selectOption(",");
+  await page
+    .locator("#csv-columns")
+    .fill(
+      "source_code = Kód\nquantity = Počet\nwarehouse = Sklad\nobserved_at = Čas",
+    );
+  await page.locator("#preview-import").click();
+  await expect(page.locator("#notice")).toContainText("Choose whether");
+  await page.locator("#csv-quantity-kind").selectOption("available");
+  await page.locator("#preview-import").click();
+  await expect(page.locator("#notice")).toContainText("Validated 1 stock rows");
+  let state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections).toHaveLength(0);
+  expect(state.lastPreview.csvImport.columns.quantity).toBe("Počet");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].csvImport.encoding).toBe("windows-1250");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.locator("#csv-mode")).toHaveValue("mapped");
+  await expect(page.locator("#csv-columns")).toHaveValue(/quantity = Počet/);
+  await expect(page.locator("#csv-quantity-kind")).toHaveValue("available");
+});
+test("wizard carries mapped CSV format through preview and save without claiming a native regional driver", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="file"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-name").fill("Mapped file");
+  await page.locator("#wizard-file").fill("file.csv");
+  await page.locator("#wizard-csv-mode").selectOption("mapped");
+  await page.locator("#wizard-csv-quantity-kind").selectOption("on_hand");
+  await page
+    .locator("#wizard-csv-columns")
+    .fill(
+      "source_code = Code\nquantity = Qty\nwarehouse = Warehouse\nobserved_at = Time",
+    );
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-preview").click();
+  await expect(page.locator("#wizard-inventory")).toContainText("SKU-A");
+  const preview = (await page.evaluate(() => window.desktop.snapshot()))
+    .lastPreview;
+  expect(preview.csvImport.quantityKind).toBe("on_hand");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "File read validated",
+  );
+  await page.locator("#wizard-save").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].platform).toBe("file");
+  expect(state.connections[0].csvImport.columns.quantity).toBe("Qty");
 });

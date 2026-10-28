@@ -2,7 +2,7 @@ name: Desktop validation
 on:
   pull_request:
   push:
-    branches: [feature/universal-inventory-sync]
+    branches: [main, "feature/**"]
 permissions:
   contents: read
 jobs:
