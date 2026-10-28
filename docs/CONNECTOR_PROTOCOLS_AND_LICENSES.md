@@ -10,7 +10,7 @@ Implemented means a driver exists and automated mock tests pass. It does not mea
 | Shopify | HTTPS Admin GraphQL 2026-07; inventory reads and compareQuantity writes | Authorized app token and inventory/location scopes; Shopify API/app terms apply. No SDK bundled | Existing mocked pagination/CAS tests; no live merchant validation |
 | CSV / XML / JSON | Local standard handover or explicit CSV import profiles; read only | Merchant must have export/data access rights. Naming a vendor does not parse its native format; exact CSV field/format mapping and complete stock required | Real temporary-file/parser/export tests |
 | CACADUU Cloud (optional) | Pinned Phase A pairing, heartbeat, status, rotation; B/C flagged and HTTP 501 handled | Authorized pairing; pinned contract does not imply a third-party SDK licence | Unmodified `docs/cloud-api/`; mocked API tests |
-| Shoptet | Setup required; no inventory driver | Merchant/add-on authorization and official stock contract pending | No successful native test claimed |
+| Shoptet | Native read-only stock API; expected shop binding, warehouses and supplies | Private API (Premium) or approved add-on API token/read rights required; no SDK/schema copied | [Pinned contract](connector-contracts/shoptet/CONTRACT.json), mocked tests; zero-claim whole stock only, no writes or live staging |
 | 14 SK/CZ/PL POS profiles | Preparation records or explicitly normalized file exports; no native driver | See [regional matrix](REGIONAL_CONNECTORS.md). Sfera/SDK/API rights must be established separately for each edition | UI/state tests only; official Dotypos/Stormware documentation blocked by running network policy |
 
 ## Setup for the new read-only sources

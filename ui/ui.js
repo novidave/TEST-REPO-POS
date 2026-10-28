@@ -436,7 +436,7 @@ function platformFields() {
     woocommerce: ["baseUrl", "token", "secret"],
     shopify: ["shopDomain", "token"],
     pos: [],
-    shoptet: [],
+    shoptet: ["shoptetEshopId", "shoptetAccess", "token"],
     cacaduu: [],
   }[platform];
   document.querySelectorAll("[data-field]").forEach((e) => {
@@ -462,7 +462,7 @@ function platformFields() {
     shopify:
       "Admin API inventory read/write scopes required. Atomic compareQuantity writes. Test with a development store first.",
     shoptet:
-      "Setup required: merchant-specific API/add-on authorization and verified inventory endpoints are not implemented.",
+      "API access required: private API (Premium) or an approved add-on API token. Read-only stock source; expected e-shop ID is verified before stock reads. Whole zero-claim stock only. Writes and two-way sync are unavailable; live staging pending.",
     pos: "Setup required: no vendor driver is bundled. Use a verified CSV/XML export from your POS.",
     cacaduu:
       "Optional Phase A pairing is available in Settings. Cloud inventory is not an active group destination.",
@@ -478,12 +478,16 @@ function editConnection(c) {
     "baseUrl",
     "database",
     "shopDomain",
+    "shoptetEshopId",
+    "shoptetAccess",
     "stockPath",
     "permission",
   ])
     if (c[key] !== undefined) cf.elements[key].value = c[key];
   cf.elements.platform.disabled = true;
   cf.elements.database.readOnly = true;
+  cf.elements.shoptetEshopId.readOnly = true;
+  cf.elements.shoptetAccess.disabled = true;
   cf.elements.baseUrl.readOnly = true;
   cf.elements.shopDomain.readOnly = true;
   cf.hidden = false;
@@ -496,6 +500,8 @@ $("new-connection").onclick = () => {
   cf.elements.id.value = "";
   cf.elements.platform.disabled = false;
   cf.elements.database.readOnly = false;
+  cf.elements.shoptetEshopId.readOnly = false;
+  cf.elements.shoptetAccess.disabled = false;
   cf.elements.baseUrl.readOnly = false;
   cf.elements.shopDomain.readOnly = false;
   cf.hidden = false;
@@ -540,6 +546,8 @@ cf.onsubmit = (e) => {
       "username",
       "password",
       "shopDomain",
+      "shoptetEshopId",
+      "shoptetAccess",
       "stockPath",
       "permission",
       "token",
@@ -736,10 +744,11 @@ const integrationMethods = [
     subtitle: "Modern POS systems",
     description: "Connect to supported online inventory APIs.",
     path: "POS provider → authenticated API → inventory workspace",
-    examples: "ERPNext, WooCommerce, Shopify · Odoo in advanced setup",
-    state: "ERPNext read-only · WooCommerce / Shopify implemented",
+    examples: "Shoptet, ERPNext, WooCommerce, Shopify · Odoo in advanced setup",
+    state: "Shoptet / ERPNext read-only · WooCommerce / Shopify implemented",
     vendor: [
       "ERPNext",
+      "Shoptet",
       "WooCommerce",
       "Shopify",
       "CACADUU Cloud",
@@ -958,7 +967,7 @@ function renderPosConnections() {
       actions.append(
         button("Export locally", () => window.desktop.export(c.id)),
       );
-    else if (["pos", "shoptet"].includes(c.platform))
+    else if (c.platform === "pos")
       actions.append(
         button("Setup", () => {
           notice(
@@ -1058,6 +1067,7 @@ function wizardPlatform() {
     return (
       {
         ERPNext: "erpnext",
+        Shoptet: "shoptet",
         WooCommerce: "woocommerce",
         Shopify: "shopify",
         "CACADUU Cloud": "cacaduu",
@@ -1067,12 +1077,16 @@ function wizardPlatform() {
 }
 function wizardFields() {
   const platform = wizardPlatform(),
-    supportedCloud = ["erpnext", "woocommerce", "shopify"].includes(platform);
+    supportedCloud = ["shoptet", "erpnext", "woocommerce", "shopify"].includes(
+      platform,
+    );
   const visible = {
     "wizard-endpoint-field":
       wizardKind === "local_api" ||
       ["woocommerce", "erpnext"].includes(platform),
     "wizard-domain-field": platform === "shopify",
+    "wizard-shoptet-id-field": platform === "shoptet",
+    "wizard-shoptet-access-field": platform === "shoptet",
     "wizard-file-field": wizardKind === "file",
     "wizard-format-field": wizardKind === "file",
     "wizard-csv-import": platform === "file",
@@ -1114,9 +1128,13 @@ function wizardFields() {
       regional.access +
       " " +
       regional.stockCaveat;
+  if (platform === "shoptet")
+    $("wizard-config-help").textContent =
+      "API access required: private API (Premium) or an approved add-on API token. Native read-only stock source, bound to the expected e-shop ID. Whole zero-claim stock only; no writes or two-way sync. Without API access you can save setup metadata; no successful connection is claimed.";
   $("wizard-preview").hidden = platform !== "file";
-  $("wizard-permission").disabled = !supportedCloud || platform === "erpnext";
-  if (!supportedCloud || platform === "erpnext")
+  $("wizard-permission").disabled =
+    !supportedCloud || ["erpnext", "shoptet"].includes(platform);
+  if (!supportedCloud || ["erpnext", "shoptet"].includes(platform))
     $("wizard-permission").value = "read";
 }
 function wizardDraft() {
@@ -1148,6 +1166,10 @@ function wizardDraft() {
     if (!draft.baseUrl) throw new Error("Enter your store HTTPS URL.");
     draft.token = $("wizard-username").value;
     draft.secret = $("wizard-password").value;
+  } else if (platform === "shoptet") {
+    draft.shoptetEshopId = $("wizard-shoptet-id").value;
+    draft.shoptetAccess = $("wizard-shoptet-access").value;
+    draft.token = $("wizard-username").value;
   } else if (platform === "shopify") {
     draft.shopDomain = $("wizard-domain").value.trim();
     if (!draft.shopDomain) throw new Error("Enter your myshopify.com domain.");

@@ -1,0 +1,35 @@
+{
+  "driver": "shoptet",
+  "state": "initial native read-only driver; merchant has no API access; mocked tests only",
+  "upstream_repository": "https://github.com/shoptet/developers",
+  "commit": "d874246dcd779a365d6890c833e76b7deba166ed",
+  "openapi_url": "https://github.com/shoptet/developers/blob/d874246dcd779a365d6890c833e76b7deba166ed/openapi/openapi.yaml",
+  "sha256": "9a7ee6609f2c98a7bfb34028e97bee7bcbd87d5e3a118dd989518a405c5c3ba0",
+  "server": "https://api.myshoptet.com",
+  "authentication": {
+    "private": "Shoptet-Private-API-Token; private API (Premium) access required",
+    "addon": "Shoptet-Access-Token; approved add-on, installed/authorized merchant and valid short-lived API token required; OAuth installation broker/automatic renewal not implemented"
+  },
+  "requests": [
+    "GET /api/eshop; data.contactInformation.eshopId must match configured immutable ID",
+    "GET /api/stocks; all warehouses, numeric stock IDs",
+    "GET /api/stocks/{stockId}/supplies?page=N&itemsPerPage=100&include=changeTime; optional exact code filter"
+  ],
+  "fields": [
+    "data.stocks[].id",
+    "data.supplies[].code",
+    "data.supplies[].productGuid",
+    "data.supplies[].amount",
+    "data.supplies[].claim",
+    "data.paginator.page",
+    "data.paginator.pageCount",
+    "data.paginator.itemsOnPage",
+    "data.paginator.itemsPerPage",
+    "data.paginator.totalCount"
+  ],
+  "semantics": "Variant code is SKU/product mapping key, numeric stock ID is warehouse key. amount copied directly as reported onHand; available unknown/null. Whole nonnegative units only. Nonzero claims refused pending reservation reconciliation/staging proof. observedAt is time of API observation, not a fabricated last stock change. No catalogue metadata inferred.",
+  "paging": "Page starts at 1, metadata/count consistency and duplicates checked, stable totals/page size required, <=1000 pages/stock, <=100000 rows total. Not a transactional snapshot.",
+  "errors": "Nonempty errors array rejected even with HTTP 200. Upstream messages never logged. HTTP 401/403/429/5xx use existing controlled errors and Retry-After governor.",
+  "writes": "Not implemented. Official movement write route is documented upstream, but no write requests or two-way support are exposed.",
+  "licensing": "No LICENSE file found at inspected repository root. No upstream schema, examples, SDK or implementation is copied/bundled. Independently authored client and protocol summary only. Vendor/API/add-on terms and merchant permissions remain separate; no certification or entitlement inferred. Application licence remains undeclared."
+}

@@ -72,9 +72,13 @@ Jobs retain stable operation IDs. Before writes/retries, the app re-reads stock,
 | Odoo 18 | Read-only internal-location quant aggregation and product SKU lookup | Legacy JSON-RPC, database/API entitlement/read rights required; whole units only; no catalogue metadata for export; live staging pending |
 | WooCommerce | Stock-managed product/variant reads, pagination, absolute quantity writes | Master only; no atomic revision check; no verified catalogue currency for export; sandbox/live validation remains |
 | Shopify | Paginated items and warehouses, `available` quantities, atomic `compareQuantity` writes | Admin API scopes required; API version 2026-07; sandbox/live validation remains; catalogue export metadata unavailable |
-| Shoptet | Setup-required forms/status | Merchant API/add-on authorization and verified endpoints not implemented |
+| Shoptet | Native read-only API, bound e-shop ID, private/add-on token modes, warehouses and paginated supplies | Merchant API access required; whole zero-claim stock only; no writes/two-way/OAuth broker; live staging pending |
 | Local POS | Categorized setup wizard, encrypted setup credentials, explicit mapping templates; existing injectable driver interface retained | No POHODA/MRP/Elcom/Square/Lightspeed vendor drivers bundled; local API, CLI, GUI automation and hardware/database references are inert setup metadata. XLSX/DBF parsing and folder watching are not implemented; use verified CSV/XML/JSON files |
 | CACADUU | Phase A client + desktop controls, timed heartbeat | Optional; B/C contract wrappers feature-gated, no inventory upload/command execution workflow |
+
+## Shoptet priority
+
+The native Shoptet stock source is implemented and mock-tested, but live activation requires private API access (documented for Premium) or an approved add-on API token. It is currently **read-only**, accepts whole zero-claim stock and verifies the expected e-shop ID before stock reads. Missing access stays setup-required. POS-to-Shoptet writes, reservation reconciliation and live validation remain incomplete. See [setup, access requirements and limitations](docs/SHOPTET.md). The [public-apis catalog review](docs/API_CATALOG_RESEARCH.md) supplies future leads, not additional implemented connectors.
 
 ## Slovakia, Czech Republic and Poland
 

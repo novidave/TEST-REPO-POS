@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 async function open(page) {
   await page.addInitScript(() => {
+    const credentialIds = new Set();
     const data = {
       connections: [],
       groups: [],
@@ -73,12 +74,21 @@ async function open(page) {
           permission: v.permission,
           status: "not_tested",
         });
+        if (v.token) credentialIds.add(data.connections.at(-1).id);
         return structuredClone(data.connections.at(-1));
       },
-      testConnection: async () => ({
-        state: "authenticated_read_ok",
-        count: 1,
-      }),
+      testConnection: async (id) => {
+        const c = data.connections.find((c) => c.id === id);
+        if (
+          c?.platform === "shoptet" &&
+          (!c.shoptetEshopId || !credentialIds.has(id))
+        )
+          return {
+            state: "setup_required",
+            message: "Shoptet API access required",
+          };
+        return { state: "authenticated_read_ok", count: 1 };
+      },
       setGroupEnabled: async (id, enabled) => {
         data.groups.find((g) => g.id === id).enabled = enabled;
         return { state: enabled ? "enabled" : "paused" };
@@ -195,7 +205,7 @@ test("Shoptet and POS forms accurately explain setup requirements", async ({
   for (const platform of ["shoptet", "pos"]) {
     await page.locator('[name="platform"]').selectOption(platform);
     await expect(page.locator("#platform-help")).toContainText(
-      "Setup required",
+      platform === "shoptet" ? "API access required" : "Setup required",
     );
     await expect(page.locator('[name="permission"]')).toBeDisabled();
   }
@@ -626,4 +636,54 @@ test("late header inspection results are discarded after the file format changes
   expect(
     (await page.evaluate(() => window.desktop.snapshot())).connections,
   ).toHaveLength(0);
+});
+test("Shoptet without API access saves preparation and never claims successful authentication", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="platform"]').selectOption("shoptet");
+  await page.locator('[name="name"]').fill("Shoptet preparation");
+  await expect(page.locator("#platform-help")).toContainText(
+    "API access required",
+  );
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  await page.getByRole("button", { name: "Test read", exact: true }).click();
+  await expect(page.locator("#notice")).toContainText("setup_required");
+  await expect(page.locator("#notice")).not.toContainText(
+    "authenticated_read_ok",
+  );
+});
+test("Shoptet wizard captures shop binding and encrypted-token input with fixed read permission", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="cloud_api"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-provider").selectOption("Shoptet");
+  await page.locator("#wizard-name").fill("Shoptet test source");
+  await page.locator("#wizard-shoptet-id").fill("123");
+  await page.locator("#wizard-shoptet-access").selectOption("private");
+  await page.locator("#wizard-username").fill("synthetic-shoptet-token");
+  await expect(page.locator("#wizard-permission")).toBeDisabled();
+  await expect(page.locator("#wizard-permission")).toHaveValue("read");
+  await expect(page.locator("#wizard-endpoint")).toBeHidden();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "authenticated_read_ok",
+  );
+  await expect(page.locator("#wizard-username")).toHaveValue("");
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].platform).toBe("shoptet");
+  expect(Number(state.connections[0].shoptetEshopId)).toBe(123);
+  expect(state.connections[0].shoptetAccess).toBe("private");
+  expect(JSON.stringify(state)).not.toContain("synthetic-shoptet-token");
 });

@@ -29,6 +29,8 @@ export interface DesktopConnection {
   baseUrl?: string;
   database?: string;
   shopDomain?: string;
+  shoptetEshopId?: number;
+  shoptetAccess?: "private" | "addon";
   stockPath?: string;
   csvImport?: CsvImportProfile;
   permission: "read" | "read_write";
@@ -233,6 +235,30 @@ export class DesktopService {
     if (platform === "file")
       c.stockPath = text(value.stockPath, "Inventory path", 4096);
     const previous = this.connections().find((x) => x.id === id);
+    if (platform === "shoptet") {
+      const eshopId = value.shoptetEshopId ?? previous?.shoptetEshopId;
+      if (eshopId !== undefined && eshopId !== "") {
+        if (
+          (typeof eshopId !== "number" &&
+            (typeof eshopId !== "string" || !/^\d+$/.test(eshopId))) ||
+          !Number.isSafeInteger(Number(eshopId)) ||
+          Number(eshopId) <= 0
+        )
+          throw new UserError("Shoptet e-shop ID must be a positive integer");
+        c.shoptetEshopId = Number(eshopId);
+      }
+      const access =
+        value.shoptetAccess || previous?.shoptetAccess || "private";
+      if (!["private", "addon"].includes(access as string))
+        throw new UserError("Invalid Shoptet API access type");
+      c.shoptetAccess = access as "private" | "addon";
+      if (c.shoptetEshopId) c.status = "not_tested";
+      if (previous && previous.shoptetEshopId !== c.shoptetEshopId)
+        throw new UserError(
+          "Create a new Shoptet connection to bind a different e-shop ID",
+        );
+    }
+
     const csvImport =
       value.csvImport === undefined ? previous?.csvImport : value.csvImport;
     if (csvImport != null) {
@@ -431,8 +457,16 @@ export class DesktopService {
         if (!credentials.token) throw new UserError("Token required");
         adapter = new ShopifyAdapter(c.id, c.shopDomain!, credentials.token);
         break;
+      case "shoptet":
+        adapter = new ShoptetAdapter(
+          c.id,
+          c.shoptetEshopId!,
+          c.shoptetAccess || "private",
+          credentials.token || "",
+        );
+        break;
       default:
-        adapter = new ShoptetAdapter(c.id);
+        throw new UserError("No verified native driver for this connection");
     }
     if (c.permission === "read") {
       const original = adapter;
@@ -457,7 +491,16 @@ export class DesktopService {
   private async testConnectionNow(id: string) {
     const c = this.connections().find((c) => c.id === id);
     if (!c) throw new UserError("Unknown connection");
-    if (["pos", "shoptet", "cacaduu"].includes(c.platform))
+    if (
+      c.platform === "shoptet" &&
+      (!c.shoptetEshopId || !(await this.vault.get(id)).token)
+    )
+      return {
+        state: "setup_required",
+        message:
+          "Shoptet API access required. Obtain private API access or an approved add-on API token, then create a connection bound to the expected e-shop ID. Never paste tokens in chat.",
+      };
+    if (["pos", "cacaduu"].includes(c.platform))
       return {
         state: "setup_required",
         message: c.regionalVendorId

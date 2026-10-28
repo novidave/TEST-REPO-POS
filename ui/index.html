@@ -278,7 +278,9 @@
                 </option>
                 <option value="woocommerce">WooCommerce</option>
                 <option value="shopify">Shopify</option>
-                <option value="shoptet">Shoptet — setup required</option>
+                <option value="shoptet">
+                  Shoptet — read only, API access required
+                </option>
                 <option value="pos">Local POS — driver required</option>
                 <option value="cacaduu">CACADUU Cloud — optional</option>
               </select></label
@@ -287,6 +289,18 @@
                 name="baseUrl"
                 type="url"
                 placeholder="https://store.example.com" /></label
+            ><label data-field="shoptetEshopId"
+              >Shoptet e-shop ID<input
+                name="shoptetEshopId"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="Expected numeric e-shop ID" /></label
+            ><label data-field="shoptetAccess"
+              >Shoptet API access<select name="shoptetAccess">
+                <option value="private">Private API (Premium)</option>
+                <option value="addon">Approved add-on API token</option>
+              </select></label
             ><label data-field="shopDomain"
               >Shop domain<input
                 name="shopDomain"
@@ -634,6 +648,18 @@
               placeholder="e.g. Main shop inventory" /></label
           ><label id="wizard-provider-field"
             >Software / provider<select id="wizard-provider"></select></label
+          ><label id="wizard-shoptet-id-field" hidden
+            >Shoptet e-shop ID<input
+              id="wizard-shoptet-id"
+              type="number"
+              min="1"
+              step="1"
+              placeholder="Expected numeric e-shop ID" /></label
+          ><label id="wizard-shoptet-access-field" hidden
+            >Shoptet API access<select id="wizard-shoptet-access">
+              <option value="private">Private API (Premium)</option>
+              <option value="addon">Approved add-on API token</option>
+            </select></label
           ><label id="wizard-format-field" hidden
             >File format<select id="wizard-format">
               <option value="supported">CSV / XML / JSON</option>

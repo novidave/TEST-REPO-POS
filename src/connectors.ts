@@ -50,11 +50,12 @@ export const connectorCapabilities = [
   {
     platform: "shoptet",
     name: "Shoptet",
-    state: "setup_required",
-    read: false,
+    state: "implemented",
+    read: true,
     write: false,
     twoWay: false,
-    detail: "Merchant authorization and verified driver required",
+    detail:
+      "Read-only native stock API; merchant access/token and bound e-shop ID required; zero-claim whole stock only; live staging pending",
   },
   {
     platform: "pos",

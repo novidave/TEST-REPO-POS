@@ -900,3 +900,101 @@ test("header inspection exposes only format metadata and cannot save connections
   assert.equal(service.connections().length, 0);
   assert.equal(service.snapshot().history.length, 0);
 });
+test("Shoptet native setup encrypts tokens, binds the expected shop and forbids writes", async (t) => {
+  const { service, dir } = await fixture(t);
+  const c = await service.saveConnection({
+    name: "Shoptet",
+    platform: "shoptet",
+    permission: "read",
+    shoptetEshopId: "123",
+    shoptetAccess: "private",
+    token: "private-token",
+  });
+  assert.equal(c.shoptetEshopId, 123);
+  assert.equal((await service.adapter(c.id)).capabilities.read, true);
+  assert.equal((await service.adapter(c.id)).write, undefined);
+  assert.doesNotMatch(JSON.stringify(service.snapshot()), /private-token/);
+  assert.doesNotMatch(
+    await readFile(join(dir, "credentials"), "utf8"),
+    /private-token/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...c, shoptetEshopId: 456 }),
+    /different e-shop/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...c, permission: "read_write" }),
+    /read-only/,
+  );
+  await assert.rejects(
+    service.saveConnection({
+      name: "Invalid",
+      platform: "shoptet",
+      permission: "read",
+      shoptetEshopId: true,
+    }),
+    /positive integer/,
+  );
+});
+test("Shoptet can be a bound read-only group source but never a destination or two-way member", async (t) => {
+  const { service } = await fixture(t);
+  await service.saveConnection({
+    id: "shoptet-source",
+    name: "Shoptet",
+    platform: "shoptet",
+    permission: "read",
+    shoptetEshopId: 123,
+    shoptetAccess: "private",
+    token: "private-token",
+  });
+  await service.saveConnection({
+    id: "shopify-dest",
+    name: "Mock target",
+    platform: "shopify",
+    permission: "read_write",
+    shopDomain: "shop.myshopify.com",
+    token: "private-token",
+  });
+  const g = {
+    id: "shoptet-group",
+    mode: "master",
+    masterId: "shoptet-source",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "shoptet-source", role: "source" },
+      { connectionId: "shopify-dest", role: "destination" },
+    ],
+    mappings: {
+      "shoptet-source": { "001": "shared" },
+      "shopify-dest": { remote: "shared" },
+    },
+    locationMappings: {
+      "shoptet-source": { 1: "main" },
+      "shopify-dest": { location: "main" },
+    },
+  };
+  await service.saveGroup(g);
+  assert.equal(service.groups()[0].masterId, "shoptet-source");
+  await assert.rejects(
+    service.saveGroup({
+      ...g,
+      id: "bad-destination",
+      masterId: "shopify-dest",
+      members: [
+        { connectionId: "shopify-dest", role: "source" },
+        { connectionId: "shoptet-source", role: "destination" },
+      ],
+    }),
+    /Read-only/,
+  );
+  await assert.rejects(
+    service.saveGroup({
+      ...g,
+      id: "bad-two-way",
+      mode: "two_way",
+      members: g.members.map((m) => ({ ...m, role: "both" })),
+    }),
+    /atomic|Read-only/,
+  );
+});
