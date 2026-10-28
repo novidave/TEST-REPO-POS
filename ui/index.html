@@ -226,6 +226,11 @@
                   </select></label
                 >
               </div>
+              <button id="csv-load-headers" type="button" class="secondary">
+                Read CSV headers
+              </button>
+              <p id="csv-header-status" class="muted" role="status"></p>
+              <div id="csv-header-selectors" class="form-grid"></div>
               <label
                 >Column mappings<textarea
                   id="csv-columns"
@@ -595,6 +600,15 @@
                   </select></label
                 >
               </div>
+              <button
+                id="wizard-csv-load-headers"
+                type="button"
+                class="secondary"
+              >
+                Read CSV headers
+              </button>
+              <p id="wizard-csv-header-status" class="muted" role="status"></p>
+              <div id="wizard-csv-header-selectors" class="form-grid"></div>
               <label
                 >Column mappings<textarea
                   id="wizard-csv-columns"

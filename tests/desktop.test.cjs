@@ -886,3 +886,17 @@ test("mapped stock-only master sync reaches mock destination despite independent
   );
   assert.deepEqual(result.errors, []);
 });
+test("header inspection exposes only format metadata and cannot save connections or export stock", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "headers.csv");
+  await writeFile(path, "Code;Qty\nsensitive-row;invalid-quantity");
+  const result = await service.csvHeaders(path, {
+    delimiter: ";",
+    encoding: "utf-8",
+  });
+  assert.equal(result.rowCount, 1);
+  assert.deepEqual(result.headers, ["Code", "Qty"]);
+  assert.doesNotMatch(JSON.stringify(result), /sensitive-row|invalid-quantity/);
+  assert.equal(service.connections().length, 0);
+  assert.equal(service.snapshot().history.length, 0);
+});

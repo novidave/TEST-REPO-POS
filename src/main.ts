@@ -179,6 +179,9 @@ async function setup() {
   );
   handle("desktop:save-group", (value) => service.saveGroup(value));
   handle("desktop:sync", (id) => service.sync(string(id, 200)));
+  handle("desktop:csv-headers", (path, format) =>
+    service.csvHeaders(path, format),
+  );
   handle("desktop:preview-file", (path, csvImport) =>
     service.previewFile(path, csvImport),
   );

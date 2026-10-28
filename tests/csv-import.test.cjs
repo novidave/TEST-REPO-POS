@@ -144,3 +144,78 @@ test("oversized file reads stop at the 16 MiB boundary", async (t) => {
   const { adapter } = await fixture(t, Buffer.alloc(16 * 1024 * 1024 + 1));
   await assert.rejects(adapter.read(), /16 MiB/);
 });
+const { inspectCsvHeaders } = require("../dist/src/sync/adapters/file.js");
+test("CSV header inspection returns exact names and row count without row values or stock validation", async (t) => {
+  const { path } = await fixture(
+    t,
+    " Code ;Qty;Warehouse;Time\nprivate-sample-row;not-a-number;main;invalid-time",
+  );
+  const result = await inspectCsvHeaders(path, {
+    delimiter: ";",
+    encoding: "utf-8",
+  });
+  assert.deepEqual(result.headers, [" Code ", "Qty", "Warehouse", "Time"]);
+  assert.equal(result.rowCount, 1);
+  assert.doesNotMatch(
+    JSON.stringify(result),
+    /private-sample-row|not-a-number|invalid-time/,
+  );
+  assert.match(result.message, /Format inspected only/);
+});
+test("header-only files can be inspected but still fail inventory validation", async (t) => {
+  const { path, adapter } = await fixture(t, headers);
+  assert.equal(
+    (await inspectCsvHeaders(path, { delimiter: ";", encoding: "utf-8" }))
+      .rowCount,
+    0,
+  );
+  await assert.rejects(adapter.read(), /Empty inventory/);
+});
+test("CSV inspection refuses duplicate/oversized headers, ragged data, invalid format and unsupported extensions", async (t) => {
+  for (const input of [
+    "A;A\n1;2",
+    "A;;B\n1;2;3",
+    "A;B\n1;2;3",
+    "X".repeat(201) + "\n1",
+    Array.from({ length: 129 }, (_, i) => "C" + i).join(";"),
+  ]) {
+    const { path } = await fixture(t, input);
+    await assert.rejects(
+      inspectCsvHeaders(path, { delimiter: ";", encoding: "utf-8" }),
+    );
+  }
+  const { path } = await fixture(t, headers + "\n" + row);
+  await assert.rejects(
+    inspectCsvHeaders(path, {
+      delimiter: ";",
+      encoding: "utf-8",
+      token: "do-not-accept",
+    }),
+  );
+  await assert.rejects(
+    inspectCsvHeaders(path + ".xml", { delimiter: ";", encoding: "utf-8" }),
+    /CSV file/,
+  );
+});
+test("CSV inspection legacy decoding uses the explicit selected encoding", async (t) => {
+  const { path } = await fixture(
+    t,
+    Buffer.from(
+      "4bf3643b506fe865743b536b6c61643bc861730a3030313b323b8e696c696e613b323032362d31302d32385431323a30303a30305a",
+      "hex",
+    ),
+  );
+  assert.deepEqual(
+    (
+      await inspectCsvHeaders(path, {
+        delimiter: ";",
+        encoding: "windows-1250",
+      })
+    ).headers,
+    ["Kód", "Počet", "Sklad", "Čas"],
+  );
+  await assert.rejects(
+    inspectCsvHeaders(path, { delimiter: ";", encoding: "utf-8" }),
+    /CSV inspection failed/,
+  );
+});

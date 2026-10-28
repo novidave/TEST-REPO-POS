@@ -45,11 +45,26 @@ const { join, resolve } = require("node:path");
     await page.locator("#wizard-csv-delimiter").selectOption(";");
     await page.locator("#wizard-csv-decimal").selectOption(",");
     await page.locator("#wizard-csv-quantity-kind").selectOption("on_hand");
-    await page
-      .locator("#wizard-csv-columns")
-      .fill(
-        "source_code = Kód\nname = Názov\nprice = Cena\ncurrency = Mena\nquantity = Počet\nwarehouse = Sklad\nobserved_at = Čas",
-      );
+    await page.locator("#wizard-csv-load-headers").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#wizard-csv-header-status")
+        .textContent.includes("stock not yet validated"),
+    );
+    for (const [field, header] of Object.entries({
+      source_code: "Kód",
+      name: "Názov",
+      price: "Cena",
+      currency: "Mena",
+      quantity: "Počet",
+      warehouse: "Sklad",
+      observed_at: "Čas",
+    }))
+      await page
+        .locator(
+          '#wizard-csv-header-selectors [data-csv-target="' + field + '"]',
+        )
+        .selectOption(header);
     await page.locator("#wizard-next").click();
     await page.locator("#wizard-preview").click();
     await page.waitForFunction(() =>

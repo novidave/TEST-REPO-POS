@@ -283,19 +283,29 @@ function render() {
   snapshot.connections.forEach((c) => option(select, c.id, c.name));
   if ([...select.options].some((o) => o.value === old)) select.value = old;
 }
-function readCsvProfile(prefix = "") {
-  if ($(prefix + "csv-mode").value !== "mapped") return null;
+function csvColumns(prefix = "") {
   const columns = {};
   for (const line of $(prefix + "csv-columns")
     .value.split(/\r?\n/)
     .filter((l) => l.trim())) {
     const index = line.indexOf("="),
       key = line.slice(0, index).trim(),
-      header = line.slice(index + 1).trim();
-    if (index < 1 || !header || Object.hasOwn(columns, key))
+      rawHeader = line.slice(index + 1).trim(),
+      header = rawHeader.startsWith('"') ? JSON.parse(rawHeader) : rawHeader;
+    if (
+      index < 1 ||
+      typeof header !== "string" ||
+      !header ||
+      Object.hasOwn(columns, key)
+    )
       throw new Error("Use one unique field = exact header mapping per line.");
     Object.defineProperty(columns, key, { value: header, enumerable: true });
   }
+  return columns;
+}
+function readCsvProfile(prefix = "") {
+  if ($(prefix + "csv-mode").value !== "mapped") return null;
+  const columns = csvColumns(prefix);
   if (!$(prefix + "csv-quantity-kind").value)
     throw new Error(
       "Choose whether the source quantity is on hand or available to sell.",
@@ -312,24 +322,111 @@ function readCsvProfile(prefix = "") {
     quantityKind: $(prefix + "csv-quantity-kind").value,
   };
 }
+function csvMappingText(columns) {
+  return Object.entries(columns)
+    .map(
+      ([k, v]) =>
+        k +
+        " = " +
+        (v === v.trim() && !v.startsWith('"') ? v : JSON.stringify(v)),
+    )
+    .join("\n");
+}
+function clearCsvHeaders(prefix) {
+  $(prefix + "csv-header-selectors").replaceChildren();
+  $(prefix + "csv-header-status").textContent = "";
+}
+function csvInspectionInput(prefix) {
+  return {
+    path: prefix ? $("wizard-file").value : cf.elements.stockPath.value,
+    format: {
+      delimiter:
+        $(prefix + "csv-delimiter").value === "tab"
+          ? "\t"
+          : $(prefix + "csv-delimiter").value,
+      encoding: $(prefix + "csv-encoding").value,
+    },
+  };
+}
+async function loadCsvHeaders(prefix) {
+  const input = csvInspectionInput(prefix),
+    signature = JSON.stringify(input);
+  const result = await window.desktop.csvHeaders(input.path, input.format);
+  if (signature !== JSON.stringify(csvInspectionInput(prefix)))
+    throw new Error("CSV file or format changed. Read the headers again.");
+  const previous = csvColumns(prefix),
+    container = $(prefix + "csv-header-selectors");
+  container.replaceChildren();
+  $(prefix + "csv-header-status").textContent =
+    result.headers.length +
+    " columns · " +
+    result.rowCount +
+    " data rows. Format only; stock not yet validated.";
+  const fields = {
+    source_code: "SKU",
+    quantity: "Quantity",
+    warehouse: "Warehouse",
+    observed_at: "Observed timestamp",
+    name: "Product name (optional)",
+    price: "Price (optional)",
+    currency: "Currency (optional)",
+    ean: "EAN (optional)",
+  };
+  for (const [field, labelText] of Object.entries(fields)) {
+    const label = element("label", labelText),
+      select = document.createElement("select");
+    select.dataset.csvTarget = field;
+    select.setAttribute("aria-label", labelText + " column");
+    option(select, "", "Choose column");
+    for (const header of result.headers)
+      option(select, header, JSON.stringify(header));
+    select.value = result.headers.includes(previous[field])
+      ? previous[field]
+      : "";
+    select.onchange = () => {
+      if (signature !== JSON.stringify(csvInspectionInput(prefix))) {
+        clearCsvHeaders(prefix);
+        return;
+      }
+      const columns = Object.fromEntries(
+        [...container.querySelectorAll("select")]
+          .filter((s) => s.value)
+          .map((s) => [s.dataset.csvTarget, s.value]),
+      );
+      $(prefix + "csv-columns").value = csvMappingText(columns);
+    };
+    label.append(select);
+    container.append(label);
+  }
+}
 function setCsvProfile(prefix, profile) {
+  clearCsvHeaders(prefix);
   $(prefix + "csv-mode").value = profile ? "mapped" : "standard";
   $(prefix + "csv-delimiter").value =
     profile?.delimiter === "\t" ? "tab" : (profile?.delimiter ?? ",");
   $(prefix + "csv-encoding").value = profile?.encoding ?? "utf-8";
   $(prefix + "csv-decimal").value = profile?.decimalSeparator ?? ".";
   $(prefix + "csv-quantity-kind").value = profile?.quantityKind ?? "";
-  $(prefix + "csv-columns").value = Object.entries(profile?.columns ?? {})
-    .map(([k, v]) => k + " = " + v)
-    .join("\n");
+  $(prefix + "csv-columns").value = csvMappingText(profile?.columns ?? {});
   $(prefix + "csv-options").hidden = !profile;
 }
-for (const prefix of ["", "wizard-"])
+for (const prefix of ["", "wizard-"]) {
+  $(prefix + "csv-load-headers").onclick = () =>
+    prefix
+      ? wizardAction(() => loadCsvHeaders(prefix))
+      : run(() => loadCsvHeaders(prefix), $(prefix + "csv-load-headers"));
+  for (const id of ["csv-delimiter", "csv-encoding"])
+    $(prefix + id).onchange = () => clearCsvHeaders(prefix);
+  $(prefix + "csv-columns").oninput = () => clearCsvHeaders(prefix);
   $(prefix + "csv-mode").onchange = () => {
+    clearCsvHeaders(prefix);
     $(prefix + "csv-options").hidden =
       $(prefix + "csv-mode").value !== "mapped";
   };
+}
 const cf = $("connection-form");
+cf.elements.stockPath.addEventListener("input", () => clearCsvHeaders(""));
+$("wizard-file").addEventListener("input", () => clearCsvHeaders("wizard-"));
 function platformFields() {
   const platform = cf.elements.platform.value;
   const visible = {
@@ -425,7 +522,10 @@ $("preview-import").onclick = () =>
 $("choose-file").onclick = () =>
   run(async () => {
     const path = await window.desktop.chooseFile();
-    if (path) cf.elements.stockPath.value = path;
+    if (path) {
+      cf.elements.stockPath.value = path;
+      clearCsvHeaders("");
+    }
   });
 cf.onsubmit = (e) => {
   e.preventDefault();
@@ -1232,7 +1332,10 @@ $("wizard-preview").onclick = () => wizardAction(previewWizardFile);
 $("wizard-choose-file").onclick = () =>
   wizardAction(async () => {
     const path = await window.desktop.chooseFile();
-    if (path) $("wizard-file").value = path;
+    if (path) {
+      $("wizard-file").value = path;
+      clearCsvHeaders("wizard-");
+    }
   });
 $("wizard-test").onclick = () =>
   wizardAction(async () => {

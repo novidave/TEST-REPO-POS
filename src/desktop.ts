@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { CredentialVault, httpsUrl, publicError, UserError } from "./security";
 import { SqliteSyncStore } from "./sync/store";
-import { FileInventoryAdapter } from "./sync/adapters/file";
+import { FileInventoryAdapter, inspectCsvHeaders } from "./sync/adapters/file";
 import { WooCommerceAdapter } from "./sync/adapters/woocommerce";
 import { ShopifyAdapter } from "./sync/adapters/shopify";
 import { ShoptetAdapter } from "./sync/adapters/shoptet";
@@ -777,6 +777,11 @@ export class DesktopService {
     );
     this.log("local_export_completed", { id, count: rows.length });
     return { state: "ok", count: rows.length };
+  }
+  csvHeaders(path: unknown, format: unknown) {
+    return this.track(() =>
+      inspectCsvHeaders(text(path, "File path", 4096), format),
+    );
   }
   previewFile(path: unknown, csvImport?: unknown) {
     return this.track(async () => {

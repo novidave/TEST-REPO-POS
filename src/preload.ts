@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 const desktop = {
+  csvHeaders: (path: string, format: unknown) =>
+    ipcRenderer.invoke("desktop:csv-headers", path, format),
   previewFile: (path: string, csvImport?: unknown) =>
     ipcRenderer.invoke("desktop:preview-file", path, csvImport),
   setGroupEnabled: (id: string, enabled: boolean) =>

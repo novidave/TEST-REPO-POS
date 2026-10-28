@@ -44,6 +44,19 @@ async function open(page) {
     };
     window.desktop = {
       snapshot: async () => structuredClone(data),
+      csvHeaders: async (path, format) => {
+        data.lastHeaderInspection = { path, format };
+        return {
+          headers: [
+            " Code ",
+            "Qty",
+            "Warehouse",
+            "Time",
+            "<img src=x onerror=alert(1)>",
+          ],
+          rowCount: 2,
+        };
+      },
       saveConnection: async (v) => {
         data.connections.push({
           id: "connection-" + (data.connections.length + 1),
@@ -550,4 +563,67 @@ test("wizard carries mapped CSV format through preview and save without claiming
   const state = await page.evaluate(() => window.desktop.snapshot());
   expect(state.connections[0].platform).toBe("file");
   expect(state.connections[0].csvImport.columns.quantity).toBe("Qty");
+});
+test("CSV header dropdowns preserve exact whitespace and render untrusted names as text", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="name"]').fill("Header mapping");
+  await page.locator('[name="stockPath"]').fill("sample.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.locator("#csv-load-headers").click();
+  await expect(page.locator("#csv-header-status")).toContainText(
+    "stock not yet validated",
+  );
+  const pane = page.locator("#csv-header-selectors");
+  await expect(pane.locator("select")).toHaveCount(8);
+  await expect(pane.locator("img")).toHaveCount(0);
+  for (const [field, column] of Object.entries({
+    source_code: " Code ",
+    quantity: "Qty",
+    warehouse: "Warehouse",
+    observed_at: "Time",
+  }))
+    await pane.locator(`[data-csv-target="${field}"]`).selectOption(column);
+  await page.locator("#csv-quantity-kind").selectOption("available");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].csvImport.columns.source_code).toBe(" Code ");
+  expect(state.lastHeaderInspection.format).toEqual({
+    delimiter: ";",
+    encoding: "utf-8",
+  });
+});
+test("late header inspection results are discarded after the file format changes", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="stockPath"]').fill("sample.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.evaluate(() => {
+    window.desktop.csvHeaders = () =>
+      new Promise((resolve) => {
+        window.releaseInspection = () =>
+          resolve({ headers: ["Code", "Qty"], rowCount: 1 });
+      });
+  });
+  await page.locator("#csv-load-headers").click();
+  await page.waitForFunction(
+    () => typeof window.releaseInspection === "function",
+  );
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.evaluate(() => window.releaseInspection());
+  await expect(page.locator("#notice")).toContainText("changed");
+  await expect(page.locator("#csv-header-selectors select")).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => window.desktop.snapshot())).connections,
+  ).toHaveLength(0);
 });

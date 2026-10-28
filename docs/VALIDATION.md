@@ -6,12 +6,12 @@ Validated on 2026-10-28 in the managed Linux environment, from a clean `npm ci` 
 |---|---|
 | `ELECTRON_GET_USE_PROXY=1 npm ci` | Passed; clean lockfile installation |
 | `npm run build` / `npm run check` | Passed; TypeScript compilation and strict type check |
-| `npm test` | 119 passed, 0 failed, 0 skipped; includes real temporary SQLite stores, CLI subprocess, pause during preflight/write, endpoint binding, concurrent configuration edits, shutdown, stale-baseline, bounded concurrency, durable provider deadlines, and 120-connection restart/failure load tests |
-| `npm exec --yes --package=node@22.15.0 -- node --test tests/*.test.cjs` | Passed; all 119 core tests under Node 22.15.0 |
+| `npm test` | 124 passed, 0 failed, 0 skipped; includes real temporary SQLite stores, CLI subprocess, pause during preflight/write, endpoint binding, concurrent configuration edits, shutdown, stale-baseline, bounded concurrency, durable provider deadlines, and 120-connection restart/failure load tests |
+| `npm exec --yes --package=node@22.15.0 -- node --test tests/*.test.cjs` | Passed; all 124 core tests under Node 22.15.0 |
 | `ELECTRON_TEST_HEADLESS=1 npm run test:electron:scale` | Passed; 120 connections created through real Electron IPC, persisted in SQLite, rendered/searched and retained on profile restart |
 | `npm run test:scale` | Passed; 120 configured test connections, 60 groups, 1,500 writes, all 60 export checksums, zero duplicate writes on restart, throttled-destination recovery |
 | `npm run format:check` | Passed |
-| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:ui` | 14 browser tests passed; mocked bridge; includes seven views, file setup, secret-field clearing, unsupported states, group maps/roles, Pause/Resume, manual sync, POS wizard file preview/mapping templates, API credential clearing, six method guides, capability/capacity display, search/filter including 120 connections, regional market filtering/native setup requirements, and unsupported states |
+| `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:ui` | 16 browser tests passed; mocked bridge; includes seven views, file setup, secret-field clearing, unsupported states, group maps/roles, Pause/Resume, manual sync, POS wizard file preview/mapping templates, API credential clearing, six method guides, capability/capacity display, search/filter including 120 connections, regional market filtering/native setup requirements, and unsupported states |
 | `npm run native:electron` | Passed; SQLite transaction under actual Electron Node-API runtime |
 | `ELECTRON_TEST_HEADLESS=1 npm run test:electron` | Passed; real app, sandboxed renderer and IPC; POS wizard setup, real unsaved file preview, persisted mapping templates, file read test, SQLite persistence, export and preservation after invalid input; same-profile restart verified |
 | `npm run smoke:electron -- --ozone-platform=headless` | Passed; startup, seven views, isolated renderer, IPC and native SQLite; container emitted display/DBus warnings |
@@ -44,8 +44,14 @@ Both portable packages were rebuilt after the connector additions. The Linux pac
 
 ## Mapped CSV import increment
 
-On 2026-10-28, 119 core tests passed under Node 24.19.0, and 14 browser tests passed. The new tests cover explicit quantity semantics, Central European Windows-1250, decimal-comma prices, quoted separators/BOM, incomplete/duplicate/ambiguous stock, source header drift, oversized files, profile persistence and queued-job/baseline guards. A real mapped-file master group delivered to a mock remote destination while local export independently failed for missing catalogue metadata. The CLI test exported a fully mapped synthetic catalogue.
+On 2026-10-28, 119 core tests passed under Node 24.19.0, and 16 browser tests passed. The new tests cover explicit quantity semantics, Central European Windows-1250, decimal-comma prices, quoted separators/BOM, incomplete/duplicate/ambiguous stock, source header drift, oversized files, profile persistence and queued-job/baseline guards. A real mapped-file master group delivered to a mock remote destination while local export independently failed for missing catalogue metadata. The CLI test exported a fully mapped synthetic catalogue.
 
 The real Electron scale test now uses a semicolon/decimal-comma mapped file through the wizard and secure IPC, verifies default stock.csv export, preserves it after incomplete data, persists the import profile, and reopens the same profile with 120 configured connections. Linux OS encryption remains unavailable in this container; Windows DPAPI and live merchant systems were not executed locally. No new native vendor integration or vendor licence entitlement is claimed.
 
 The mapped-import increment also passed all 119 tests on Node 22.15.0. Linux and Windows x64 packages rebuilt successfully; the final Linux packaged app passed the mapped-file IPC/export/restart workflow. Windows was cross-built on Linux, not executed here. Type checking, formatting and git diff checks passed. Dependency licence metadata remains 91 packages with no dependency changes.
+
+## Read-only CSV header discovery
+
+The follow-up header-inspection increment passed 124 core tests on Node 24.19.0 and Node 22.15.0. It returns exact column names and row counts without returning stock rows or validating inventory. Tests cover header-only files, legacy decoding, invalid/duplicate/oversized headers, malformed rows, unsupported inspection options, absence of persistence and preservation of exact header whitespace. Renderer tests cover safe text rendering and discarding a late result after format changes. The real Electron scale workflow now reads actual headers through the fixed IPC bridge and builds its mapped profile using dropdowns before validating/exporting and reopening the profile. The dependency lockfile and licence inventory are unchanged.
+
+For header discovery, all 16 renderer tests passed. The Linux packaged application passed the actual header-dropdown/mapped-file/export/profile-restart test, and both Linux and Windows x64 packages rebuilt. Windows execution remains unverified locally. Type checking, formatting, dependency licence metadata regeneration and diff checks passed. The refreshed standalone demo also passed a browser check of its eight column selectors without renderer errors.

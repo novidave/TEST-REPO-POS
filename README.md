@@ -82,7 +82,7 @@ POS Connections includes 14 requested regional preparation profiles with country
 
 ## Regional CSV exports
 
-The file connector now supports saved explicit CSV profiles: exact column mapping, comma/semicolon/tab/pipe separators, UTF-8 or Windows-1250/1252, decimal point/comma, and declared on-hand versus available stock. Configure this in the POS wizard or advanced form and preview before saving. Stock-only imports can synchronize but preserve the previous local export until verified catalogue metadata is supplied. See [setup, CLI example and validation limits](docs/CSV_IMPORT_PROFILES.md). This does not add native vendor API drivers or assume arbitrary vendor exports are compatible.
+The file connector now supports saved explicit CSV profiles: exact column mapping, comma/semicolon/tab/pipe separators, UTF-8 or Windows-1250/1252, decimal point/comma, and declared on-hand versus available stock. Configure this in the POS wizard or advanced form. Read the actual CSV headers, select columns from dropdowns, then preview stock before saving. Header inspection is read-only format discovery and does not imply valid inventory. Stock-only imports can synchronize but preserve the previous local export until verified catalogue metadata is supplied. See [setup, CLI example and validation limits](docs/CSV_IMPORT_PROFILES.md). This does not add native vendor API drivers or assume arbitrary vendor exports are compatible.
 
 ## Protocol and licence records
 

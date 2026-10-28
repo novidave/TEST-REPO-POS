@@ -178,3 +178,60 @@ export class FileInventoryAdapter implements InventoryAdapter {
     return rows;
   }
 }
+/** Read-only format inspection. Returns header metadata, never row contents or a successful stock validation. */
+export async function inspectCsvHeaders(path: string, format: unknown) {
+  if (extname(path).toLowerCase() !== ".csv")
+    throw new UserError("CSV header inspection requires a CSV file");
+  if (!format || typeof format !== "object" || Array.isArray(format))
+    throw new UserError("Select CSV separator and encoding");
+  const f = format as Record<string, unknown>;
+  if (
+    Object.keys(f).some((k) => !["delimiter", "encoding"].includes(k)) ||
+    ![",", ";", "\t", "|"].includes(f.delimiter as string) ||
+    !["utf-8", "windows-1250", "windows-1252"].includes(f.encoding as string)
+  )
+    throw new UserError("Invalid CSV inspection format");
+  try {
+    const bytes = await boundedBytes(path);
+    const text = new TextDecoder(f.encoding as string, { fatal: true }).decode(
+      bytes,
+    );
+    let headers: string[] = [];
+    const rows = parse(text, {
+      delimiter: f.delimiter as string,
+      bom: true,
+      skip_empty_lines: true,
+      columns: (values: string[]) => {
+        if (
+          !values.length ||
+          values.length > 128 ||
+          values.some(
+            (h) => !h.trim() || h.length > 200 || /[\r\n\0]/.test(h),
+          ) ||
+          new Set(values).size !== values.length
+        )
+          throw new UserError(
+            "CSV headers must be unique, nonempty and at most 128 columns of 200 characters",
+          );
+        headers = values;
+        return values;
+      },
+    }) as unknown[];
+    if (!headers.length) throw new UserError("CSV header row is missing");
+    if (rows.length > 100000)
+      throw new UserError(
+        "Inventory exceeds 100000 rows; split the export explicitly",
+      );
+    return {
+      headers,
+      rowCount: rows.length,
+      message:
+        "Format inspected only. Map columns and preview to validate stock.",
+    };
+  } catch (error) {
+    if (error instanceof UserError) throw error;
+    throw new UserError(
+      "CSV inspection failed. Check file access, separator, encoding, quoting and row widths.",
+    );
+  }
+}
