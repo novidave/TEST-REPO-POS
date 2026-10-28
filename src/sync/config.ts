@@ -59,6 +59,12 @@ export function createAdapters(
         platform: a.platform,
         capabilities: { ...a.capabilities, write: false },
         read: () => original.read(),
+        ...(original.readOne
+          ? {
+              readOne: (productKey: string, location: string) =>
+                original.readOne!(productKey, location),
+            }
+          : {}),
       };
     }
     result.set(c.id, a);

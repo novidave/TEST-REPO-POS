@@ -165,3 +165,128 @@ test("Shopify refuses missing revisions and reports user errors", async () => {
     /rejected/,
   );
 });
+test("Shopify prefetches warehouse quantities with inventory items instead of a query per product", async () => {
+  let requests = 0;
+  const a = new ShopifyAdapter(
+    "shop",
+    "prefetch.myshopify.com",
+    "fixture",
+    "2026-07",
+    async () => {
+      requests++;
+      return new Response(
+        JSON.stringify({
+          data: {
+            inventoryItems: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              edges: [1, 2].map((id) => ({
+                node: {
+                  id: "gid://InventoryItem/" + id,
+                  sku: "SKU-" + id,
+                  inventoryLevels: {
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                    edges: [
+                      {
+                        node: {
+                          location: { id: "warehouse" },
+                          quantities: [{ name: "available", quantity: 2 }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              })),
+            },
+          },
+        }),
+      );
+    },
+  );
+  assert.equal((await a.read()).length, 2);
+  assert.equal(requests, 1);
+});
+test("Shopify targeted reads request only the mapped item and warehouse", async () => {
+  const a = new ShopifyAdapter(
+    "shop",
+    "point.myshopify.com",
+    "fixture",
+    "2026-07",
+    async (_url, init) => {
+      const request = JSON.parse(init.body);
+      assert.deepEqual(request.variables, {
+        id: "product",
+        location: "warehouse",
+      });
+      return new Response(
+        JSON.stringify({
+          data: {
+            inventoryItem: {
+              id: "product",
+              sku: "SKU",
+              inventoryLevel: {
+                location: { id: "warehouse" },
+                quantities: [{ name: "available", quantity: 0 }],
+              },
+            },
+          },
+        }),
+      );
+    },
+  );
+  const row = await a.readOne("product", "warehouse");
+  assert.equal(row.available, 0);
+  assert.equal(row.revision, "0");
+});
+test("WooCommerce targeted reads preserve variant identity and reject unsafe quantities", async () => {
+  let url;
+  const a = new WooCommerceAdapter(
+    "woo",
+    "https://point.test",
+    "fixture",
+    "fixture",
+    async (input) => {
+      url = input;
+      return new Response(
+        JSON.stringify({ sku: "SKU", manage_stock: true, stock_quantity: 2 }),
+      );
+    },
+  );
+  const row = await a.readOne("1:2", "default");
+  assert.match(url, /products\/1\/variations\/2$/);
+  assert.equal(row.productKey, "1:2");
+  assert.equal(await a.readOne("1:2", "unknown-warehouse"), undefined);
+});
+test("Shopify GraphQL throttling becomes a safe retryable provider error", async () => {
+  const { ProviderHttpError } = require("../dist/src/sync/http.js");
+  const a = new ShopifyAdapter(
+    "shop",
+    "throttle.myshopify.com",
+    "private-fixture",
+    "2026-07",
+    async () =>
+      new Response(
+        JSON.stringify({
+          errors: [
+            {
+              message: "private response ignored",
+              extensions: { code: "THROTTLED" },
+            },
+          ],
+          extensions: {
+            cost: {
+              requestedQueryCost: 10,
+              throttleStatus: { currentlyAvailable: 0, restoreRate: 2 },
+            },
+          },
+        }),
+      ),
+  );
+  await assert.rejects(
+    a.read(),
+    (error) =>
+      error instanceof ProviderHttpError &&
+      error.status === 429 &&
+      error.retryAt > Date.now() &&
+      !error.message.includes("private"),
+  );
+});

@@ -1,3 +1,4 @@
+import { mapConcurrent } from "./runtime";
 import { UserError } from "../security";
 import { randomUUID } from "node:crypto";
 import type { Conflict, Plan, Stock, SyncGroup, StockWrite } from "./types";
@@ -92,29 +93,36 @@ export async function planGroup(
     );
   const destinationErrors: { destination: string; error: string }[] = [];
   const readings = (
-    await Promise.all(
-      group.members.map(async (member) => {
-        try {
-          if (!member.adapter.capabilities.read)
-            throw new UserError("Member inventory cannot be verified");
-          const rows = await member.adapter.read();
-          validateStock(rows);
-          return { ...member, rows };
-        } catch (e) {
-          if (
-            group.mode !== "master" ||
-            member.adapter.id === group.masterId ||
-            member.role !== "destination"
-          )
-            throw e;
-          destinationErrors.push({
-            destination: member.adapter.id,
-            error: "Destination inventory read failed",
-          });
+    await mapConcurrent(group.members, 4, async (member) => {
+      try {
+        // Existing jobs own this destination until drained/reconciled. Do not
+        // re-read a throttled/held destination just to create a plan we cannot use.
+        if (
+          group.mode === "master" &&
+          member.adapter.id !== group.masterId &&
+          member.role !== "source" &&
+          store.outstanding?.(group.id, member.adapter.id)
+        )
           return null;
-        }
-      }),
-    )
+        if (!member.adapter.capabilities.read)
+          throw new UserError("Member inventory cannot be verified");
+        const rows = await member.adapter.read();
+        validateStock(rows);
+        return { ...member, rows };
+      } catch (e) {
+        if (
+          group.mode !== "master" ||
+          member.adapter.id === group.masterId ||
+          member.role !== "destination"
+        )
+          throw e;
+        destinationErrors.push({
+          destination: member.adapter.id,
+          error: "Destination inventory read failed",
+        });
+        return null;
+      }
+    })
   ).filter((r): r is NonNullable<typeof r> => r !== null);
   const observations = new Map<
     string,

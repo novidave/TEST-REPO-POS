@@ -1,3 +1,10 @@
+import { connectorCapabilities } from "./connectors";
+import {
+  SyncCoordinator,
+  StaggeredScheduler,
+  type TimerClock,
+} from "./sync/runtime";
+import { providerRequests } from "./sync/http";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { CredentialVault, httpsUrl, publicError, UserError } from "./security";
@@ -7,7 +14,7 @@ import { WooCommerceAdapter } from "./sync/adapters/woocommerce";
 import { ShopifyAdapter } from "./sync/adapters/shopify";
 import { ShoptetAdapter } from "./sync/adapters/shoptet";
 import { validateStock } from "./sync/engine";
-import { runGroup, SyncScheduler } from "./sync/runner";
+import { runGroup } from "./sync/runner";
 import { exportStock, exportRows } from "./export";
 import type { GroupConfig } from "./sync/config";
 import type { InventoryAdapter, Platform, SyncGroup } from "./sync/types";
@@ -45,7 +52,8 @@ const text = (value: unknown, label: string, max = 200): string => {
 };
 export class DesktopService {
   readonly store: SqliteSyncStore;
-  readonly scheduler: SyncScheduler;
+  readonly scheduler: StaggeredScheduler;
+  readonly runtime: SyncCoordinator;
   private busy = new Set<string>();
   private active = 0;
   private closing = false;
@@ -53,9 +61,25 @@ export class DesktopService {
   constructor(
     readonly directory: string,
     private readonly vault: CredentialVault,
+    options: {
+      schedulerClock?: TimerClock;
+      syncConcurrency?: number;
+      maxPending?: number;
+    } = {},
   ) {
+    this.runtime = new SyncCoordinator(
+      options.syncConcurrency ?? 4,
+      options.maxPending ?? 256,
+    );
     this.store = new SqliteSyncStore(join(directory, "inventory.db"));
-    this.scheduler = new SyncScheduler(this.store);
+    this.scheduler = new StaggeredScheduler(
+      (id) => this.sync(id),
+      options.schedulerClock,
+      (id, error) => {
+        if (!this.closing)
+          this.log("schedule_deferred", { id, message: publicError(error) });
+      },
+    );
   }
   private mutations: Promise<unknown> = Promise.resolve();
   private editing = false;
@@ -73,10 +97,6 @@ export class DesktopService {
   private mutate<T>(action: () => Promise<T>): Promise<T> {
     return this.track(async () => {
       const operation = this.mutations.then(async () => {
-        if (this.busy.size)
-          throw new UserError(
-            "Wait for active sync before editing configuration",
-          );
         this.editing = true;
         try {
           return await action();
@@ -111,6 +131,12 @@ export class DesktopService {
   }
   snapshot() {
     return {
+      connectorCapabilities,
+      runtime: {
+        groups: this.runtime.stats(),
+        requests: providerRequests.stats(),
+        schedules: this.scheduler.status(),
+      },
       outstandingJobs: (
         this.store.db
           .prepare("SELECT COUNT(*) count FROM outbox WHERE state!='done'")
@@ -123,7 +149,7 @@ export class DesktopService {
         .all(),
       jobs: this.store.db
         .prepare(
-          "SELECT id,group_id,destination,product_key,location,quantity,state,attempts,last_error FROM outbox ORDER BY (state!='done') DESC,created_at DESC LIMIT 100",
+          "SELECT id,group_id,destination,product_key,location,quantity,state,attempts,last_error,next_attempt_at FROM outbox ORDER BY (state!='done') DESC,created_at DESC LIMIT 100",
         )
         .all(),
       conflicts: this.store.db
@@ -144,8 +170,16 @@ export class DesktopService {
     const id = value.id ? text(value.id, "ID") : randomUUID();
     if (!/^[A-Za-z0-9_-]+$/.test(id))
       throw new UserError("Invalid connection ID");
-    if (this.busy.size)
-      throw new UserError("Wait for active sync before editing connections");
+    if (
+      this.groups().some(
+        (group) =>
+          this.busy.has(group.id) &&
+          group.members.some((member) => member.connectionId === id),
+      )
+    )
+      throw new UserError(
+        "Wait for the active sync using this connection before editing it",
+      );
     const platform = text(value.platform, "Platform") as Platform;
     if (
       !["woocommerce", "shopify", "shoptet", "pos", "file", "cacaduu"].includes(
@@ -344,6 +378,12 @@ export class DesktopService {
         platform: original.platform,
         capabilities: { ...original.capabilities, write: false },
         read: () => original.read(),
+        ...(original.readOne
+          ? {
+              readOne: (productKey: string, location: string) =>
+                original.readOne!(productKey, location),
+            }
+          : {}),
       };
     }
     return adapter;
@@ -579,9 +619,29 @@ export class DesktopService {
     this.busy.add(id);
     this.active++;
     try {
-      const config = this.groups().find((g) => g.id === id);
+      const config = this.groups().find((group) => group.id === id);
       if (!config || !config.enabled)
         throw new UserError("Enable a configured group first");
+      return await this.runtime.run(
+        config.members.map((member) => member.connectionId),
+        () => this.executeSync(id),
+      );
+    } finally {
+      this.busy.delete(id);
+      this.active--;
+      if (!this.active) this.idle.splice(0).forEach((resolve) => resolve());
+    }
+  }
+  private async executeSync(id: string) {
+    try {
+      const config = this.groups().find((g) => g.id === id);
+      if (!config || !config.enabled || this.closing)
+        return {
+          plan: { groupId: id, writes: [], conflicts: [], sourceCount: 0 },
+          errors: [],
+          paused: true,
+          exportState: "not_applicable",
+        };
       const g = await this.group(config);
       let exportState = "not_applicable";
       // Local delivery remains default and independent of optional remote destinations.
@@ -604,9 +664,7 @@ export class DesktopService {
         }
       }
       const result = await runGroup(g, this.store, {
-        canContinue: () =>
-          !this.closing &&
-          Boolean(this.groups().find((group) => group.id === id)?.enabled),
+        canContinue: () => !this.closing && this.store.isGroupEnabled(id),
       });
       this.log(result.paused ? "sync_paused" : "sync_completed", {
         id,
@@ -619,10 +677,6 @@ export class DesktopService {
     } catch (e) {
       this.log("sync_failed", { id, message: publicError(e) });
       throw e;
-    } finally {
-      this.busy.delete(id);
-      this.active--;
-      if (!this.active) this.idle.splice(0).forEach((resolve) => resolve());
     }
   }
   dismissJob(id: string) {
@@ -695,23 +749,15 @@ export class DesktopService {
         quantity: available ?? onHand,
       }));
   }
-  private timers: ReturnType<typeof setInterval>[] = [];
   async restartSchedules() {
-    this.timers.forEach(clearInterval);
-    this.timers = [];
     if (this.closing) return;
-    for (const g of this.groups().filter((g) => g.enabled))
-      this.timers.push(
-        setInterval(() => {
-          this.sync(g.id).catch(() => {});
-        }, g.intervalMinutes * 60000),
-      );
+    this.scheduler.configure(this.groups());
   }
   close(): Promise<void> {
     if (this.shutdown) return this.shutdown;
     this.closing = true;
-    this.timers.forEach(clearInterval);
     this.scheduler.stopAll();
+    this.runtime.close();
     this.shutdown = (async () => {
       if (this.active)
         await new Promise<void>((resolve) => this.idle.push(resolve));

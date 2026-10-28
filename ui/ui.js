@@ -130,6 +130,31 @@ function render() {
     snapshot.jobs.filter((j) => j.state !== "done").length;
   $("export-path").textContent =
     snapshot.exportDirectory + " / <group or connection ID>";
+  const runtime = snapshot.runtime;
+  const capacity = runtime
+    ? `${runtime.groups.active} / ${runtime.groups.concurrency} sync groups active · ${runtime.groups.pending - runtime.groups.active} waiting · ${runtime.requests.active} / ${runtime.requests.concurrency} provider requests active`
+    : "Sync groups use bounded concurrency and staggered polling. Open the desktop app for live capacity metrics.";
+  $("runtime-status").textContent = capacity;
+  $("capacity-status").textContent = capacity;
+  const capabilities = (snapshot.connectorCapabilities ?? []).map((c) => ({
+    ...c,
+    read: c.read ? "Yes" : "No",
+    write: c.write ? "Yes" : "No",
+    twoWay: c.twoWay ? "Atomic CAS" : "No",
+    state: c.state.replaceAll("_", " "),
+  }));
+  table(
+    "connector-capabilities",
+    [
+      ["Connector", "name"],
+      ["State", "state"],
+      ["Read", "read"],
+      ["Write", "write"],
+      ["Two-way", "twoWay"],
+      ["Scope", "detail"],
+    ],
+    capabilities,
+  );
   renderPosConnections();
   const groupList = $("group-list"),
     syncList = $("sync-list");
@@ -217,6 +242,12 @@ function render() {
   ];
   table("history-table", logColumns, logs);
   table("recent", logColumns, logs.slice(0, 5));
+  const jobs = snapshot.jobs.map((job) => ({
+    ...job,
+    nextAttempt: job.next_attempt_at
+      ? new Date(job.next_attempt_at).toLocaleString()
+      : "—",
+  }));
   const jobColumns = [
     ["Group", "group_id"],
     ["Destination", "destination"],
@@ -225,13 +256,14 @@ function render() {
     ["Quantity", "quantity"],
     ["State", "state"],
     ["Attempts", "attempts"],
+    ["Retry after", "nextAttempt"],
     ["Detail", "last_error"],
   ];
-  table("job-table", jobColumns, snapshot.jobs);
+  table("job-table", jobColumns, jobs);
   table(
     "sync-jobs",
     jobColumns,
-    snapshot.jobs.filter((j) => j.state !== "done"),
+    jobs.filter((j) => j.state !== "done"),
   );
   table(
     "conflict-table",

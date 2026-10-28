@@ -511,3 +511,71 @@ test("file preview reads real data without persisting a connection and refuses i
   );
   await assert.rejects(service.previewFile(path));
 });
+test("connector catalog reports installed driver capabilities without advertising unsupported vendors", async (t) => {
+  const { service } = await fixture(t);
+  const state = service.snapshot();
+  assert.equal(state.runtime.groups.concurrency, 4);
+  assert.equal(state.runtime.requests.concurrency, 8);
+  assert.equal(
+    state.connectorCapabilities.find((c) => c.platform === "shopify").twoWay,
+    true,
+  );
+  assert.equal(
+    state.connectorCapabilities.find((c) => c.platform === "woocommerce")
+      .twoWay,
+    false,
+  );
+  assert.equal(
+    state.connectorCapabilities.find((c) => c.platform === "pos").read,
+    false,
+  );
+});
+test("unrelated connections remain configurable while a different group is queued or active", async (t) => {
+  const { service } = await fixture(t);
+  await service.saveConnection({
+    id: "used",
+    name: "Used source",
+    platform: "file",
+    stockPath: "used.csv",
+    permission: "read",
+  });
+  const group = {
+    id: "active-group",
+    mode: "master",
+    masterId: "used",
+    members: [
+      { connectionId: "used", role: "source" },
+      { connectionId: "destination", role: "destination" },
+    ],
+    enabled: true,
+    intervalMinutes: 1,
+    mappings: {},
+    locationMappings: {},
+  };
+  service.store.db
+    .prepare("INSERT INTO sync_groups VALUES(?,?,?,?,?,?)")
+    .run(group.id, group.mode, group.masterId, 1, 1, JSON.stringify(group));
+  service.busy.add(group.id);
+  try {
+    const other = await service.saveConnection({
+      id: "other",
+      name: "Other file",
+      platform: "file",
+      stockPath: "other.csv",
+      permission: "read",
+    });
+    assert.equal(other.id, "other");
+    await assert.rejects(
+      service.saveConnection({
+        id: "used",
+        name: "Used source",
+        platform: "file",
+        stockPath: "changed.csv",
+        permission: "read",
+      }),
+      /active sync/,
+    );
+  } finally {
+    service.busy.delete(group.id);
+  }
+});

@@ -83,7 +83,9 @@ test("API failure retries durable operation with stable ID after restart", async
   const original = f.store.db.prepare("SELECT * FROM outbox").get();
   assert.doesNotMatch(JSON.stringify(original), /NEVER-LOG/);
   f.reopen();
-  f.store.db.prepare("UPDATE outbox SET created_at='2000-01-01'").run();
+  f.store.db
+    .prepare("UPDATE outbox SET next_attempt_at=0,created_at='2000-01-01'")
+    .run();
   f.b.write = async (u) => {
     f.calls.push(u);
     f.setQ(5);
@@ -107,7 +109,9 @@ test("crash after remote success reconciles without duplicate write", async (t) 
   f.store.attempt("crash");
   f.setQ(5);
   f.reopen();
-  f.store.db.prepare("UPDATE outbox SET created_at='2000-01-01'").run();
+  f.store.db
+    .prepare("UPDATE outbox SET next_attempt_at=0,created_at='2000-01-01'")
+    .run();
   await runGroup(f.g, f.store);
   assert.equal(f.calls.length, 0);
   assert.equal(
@@ -143,7 +147,9 @@ test("uncertain non-atomic writes are held after crash", async (t) => {
     operationId: "uncertain",
   });
   f.store.attempt("uncertain");
-  f.store.db.prepare("UPDATE outbox SET created_at='2000-01-01'").run();
+  f.store.db
+    .prepare("UPDATE outbox SET next_attempt_at=0,created_at='2000-01-01'")
+    .run();
   await runGroup(f.g, f.store);
   assert.equal(f.calls.length, 0);
   assert.equal(
@@ -256,7 +262,9 @@ test("retry backoff prevents immediate reattempt and attempt limit holds job", a
   await runGroup(f.g, f.store);
   assert.equal(f.calls.length, 1);
   for (let i = 0; i < 4; i++) {
-    f.store.db.prepare("UPDATE outbox SET created_at='2000-01-01'").run();
+    f.store.db
+      .prepare("UPDATE outbox SET next_attempt_at=0,created_at='2000-01-01'")
+      .run();
     await runGroup(f.g, f.store);
   }
   const row = f.store.db.prepare("SELECT state,attempts FROM outbox").get();
@@ -330,4 +338,118 @@ test("pausing during a sent write stops subsequent jobs and retains their operat
       .get().count,
     1,
   );
+});
+test("provider Retry-After is durable and stops a destination failure storm", async (t) => {
+  const f = fixture(t);
+  const { ProviderHttpError } = require("../dist/src/sync/http.js");
+  const until = Date.now() + 60000;
+  f.g.members[0].adapter.read = async () => [
+    row(5),
+    { ...row(5), productKey: "p2", sku: "SKU2" },
+  ];
+  f.b.read = async () => [row(3), { ...row(3), productKey: "p2", sku: "SKU2" }];
+  f.g.mappings.a.p2 = "p2";
+  f.g.mappings.b.p2 = "p2";
+  let attempts = 0;
+  f.b.write = async () => {
+    attempts++;
+    throw new ProviderHttpError("Shopify", 429, until);
+  };
+  await runGroup(f.g, f.store);
+  assert.equal(attempts, 1);
+  assert.equal(f.store.pending("g", "b").length, 0);
+  const pending = f.store.db
+    .prepare("SELECT id,next_attempt_at,attempts FROM outbox")
+    .all();
+  assert.ok(pending.every((row) => row.next_attempt_at >= until));
+  assert.equal(
+    pending.reduce((n, row) => n + row.attempts, 0),
+    1,
+  );
+  f.reopen();
+  assert.equal(f.store.pending("g", "b").length, 0);
+  let destinationReads = 0;
+  f.b.read = async () => {
+    destinationReads++;
+    return [row(3)];
+  };
+  await runGroup(f.g, f.store);
+  assert.equal(
+    destinationReads,
+    0,
+    "pending provider cooldown must suppress destination reads as well as writes",
+  );
+  assert.equal(attempts, 1);
+});
+test("authentication failure holds all destination jobs without retrying every product", async (t) => {
+  const f = fixture(t);
+  const { ProviderHttpError } = require("../dist/src/sync/http.js");
+  let requests = 0;
+  f.b.write = async () => {
+    requests++;
+    throw new ProviderHttpError("Shopify", 401);
+  };
+  await runGroup(f.g, f.store);
+  assert.equal(requests, 1);
+  assert.equal(
+    f.store.db.prepare("SELECT state FROM outbox").get().state,
+    "blocked",
+  );
+});
+test("targeted preflight reads keep CAS validation without repeatedly downloading inventories", async (t) => {
+  const f = fixture(t);
+  let sourceReads = 0,
+    destinationReads = 0,
+    pointReads = 0;
+  f.g.members[0].adapter.read = async () => {
+    sourceReads++;
+    return [row(5)];
+  };
+  f.b.read = async () => {
+    destinationReads++;
+    return [row(3)];
+  };
+  f.g.members[0].adapter.readOne = async () => {
+    pointReads++;
+    return row(5);
+  };
+  f.b.readOne = async () => {
+    pointReads++;
+    return row(3);
+  };
+  await runGroup(f.g, f.store);
+  assert.equal(sourceReads, 1);
+  assert.equal(destinationReads, 1);
+  assert.equal(pointReads, 2);
+  assert.equal(f.calls[0][0].expectedRevision, "3");
+});
+test("existing SQLite outbox schema migrates additively and preserves pending jobs", (t) => {
+  const Database = require("better-sqlite3");
+  const path = mkdtempSync(join(tmpdir(), "old-outbox-"));
+  t.after(() => rmSync(path, { recursive: true, force: true }));
+  const file = join(path, "db");
+  const old = new Database(file);
+  old.exec(
+    "CREATE TABLE outbox(id TEXT PRIMARY KEY, group_id TEXT NOT NULL, destination TEXT NOT NULL, product_key TEXT NOT NULL, location TEXT NOT NULL, quantity REAL NOT NULL, expected_revision TEXT, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, created_at TEXT NOT NULL)",
+  );
+  old
+    .prepare(
+      "INSERT INTO outbox(id,group_id,destination,product_key,location,quantity,created_at) VALUES(?,?,?,?,?,?,?)",
+    )
+    .run("existing", "g", "b", "p", "w", 2, new Date().toISOString());
+  old.close();
+  const migrated = new SqliteSyncStore(file);
+  try {
+    assert.equal(migrated.pending("g", "b")[0].id, "existing");
+    assert.equal(
+      migrated.db
+        .pragma("table_info(outbox)")
+        .filter((c) => c.name === "next_attempt_at").length,
+      1,
+    );
+  } finally {
+    migrated.close();
+  }
+  const reopened = new SqliteSyncStore(file);
+  reopened.close();
 });

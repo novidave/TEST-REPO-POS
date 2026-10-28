@@ -1,13 +1,36 @@
-import type { SyncGroup } from "./types";
+import { ProviderHttpError } from "./http";
+import type { InventoryAdapter, Stock, SyncGroup } from "./types";
 import { planGroup, validateStock } from "./engine";
 import { SqliteSyncStore } from "./store";
-const active = new Set<string>();
+const running = new WeakMap<SqliteSyncStore, Set<string>>();
+async function observe(
+  adapter: InventoryAdapter,
+  productKey: string | undefined,
+  location: string | undefined,
+): Promise<Stock | undefined> {
+  if (!productKey || !location) return undefined;
+  if (adapter.readOne) {
+    const row = await adapter.readOne(productKey, location);
+    if (!row) return undefined;
+    validateStock([row]);
+    if (row.productKey !== productKey || row.location !== location)
+      throw new Error("Adapter returned a different product or warehouse");
+    return row;
+  }
+  const rows = await adapter.read();
+  validateStock(rows);
+  return rows.find(
+    (row) => row.productKey === productKey && row.location === location,
+  );
+}
 export async function runGroup(
   group: SyncGroup,
   store: SqliteSyncStore,
   options: { canContinue?: () => boolean } = {},
 ) {
   const canContinue = () => group.enabled && (options.canContinue?.() ?? true);
+  const active = running.get(store) ?? new Set<string>();
+  running.set(store, active);
   if (active.has(group.id)) throw new Error("Group sync is already running");
   active.add(group.id);
   try {
@@ -25,6 +48,26 @@ export async function runGroup(
     const errors: { destination: string; error: string }[] = [
       ...(plan.destinationErrors ?? []),
     ];
+    const reverseProducts = new Map(
+      group.members.map((member) => [
+        member.adapter.id,
+        new Map(
+          Object.entries(group.mappings[member.adapter.id] ?? {}).map(
+            ([local, canonical]) => [canonical, local],
+          ),
+        ),
+      ]),
+    );
+    const reverseLocations = new Map(
+      group.members.map((member) => [
+        member.adapter.id,
+        new Map(
+          Object.entries(group.locationMappings?.[member.adapter.id] ?? {}).map(
+            ([local, canonical]) => [canonical, local],
+          ),
+        ),
+      ]),
+    );
     for (const member of group.members) {
       const adapter = member.adapter;
       if (
@@ -43,12 +86,10 @@ export async function runGroup(
             const source = group.members.find(
               (m) => m.adapter.id === group.masterId,
             )!.adapter;
-            const sourceRows = await source.read();
-            validateStock(sourceRows);
-            const sourceItem = sourceRows.find(
-              (s) =>
-                group.mappings[source.id]?.[s.productKey] === canonical &&
-                group.locationMappings?.[source.id]?.[s.location] === warehouse,
+            const sourceItem = await observe(
+              source,
+              reverseProducts.get(source.id)?.get(canonical),
+              reverseLocations.get(source.id)?.get(warehouse!),
             );
             if (
               !sourceItem ||
@@ -68,14 +109,10 @@ export async function runGroup(
             for (const peer of group.members.filter(
               (m) => m.adapter.id !== adapter.id,
             )) {
-              const observations = await peer.adapter.read();
-              validateStock(observations);
-              const observation = observations.find(
-                (s) =>
-                  group.mappings[peer.adapter.id]?.[s.productKey] ===
-                    canonical &&
-                  group.locationMappings?.[peer.adapter.id]?.[s.location] ===
-                    warehouse,
+              const observation = await observe(
+                peer.adapter,
+                reverseProducts.get(peer.adapter.id)?.get(canonical),
+                reverseLocations.get(peer.adapter.id)?.get(warehouse!),
               );
               const baseline = observation
                 ? store.previous(
@@ -101,12 +138,7 @@ export async function runGroup(
               continue;
             }
           }
-          const fresh = await adapter.read();
-          validateStock(fresh);
-          const current = fresh.find(
-            (s) =>
-              s.productKey === row.product_key && s.location === row.location,
-          );
+          const current = await observe(adapter, row.product_key, row.location);
           if (!current) {
             store.block(row.id, "Mapped destination item missing");
             continue;
@@ -147,12 +179,43 @@ export async function runGroup(
             },
           ]);
           store.done(row.id);
-        } catch {
+        } catch (error) {
           const message =
             "Destination request failed; inspect connection and retry queue";
           if (!attempted) store.attempt(row.id);
-          store.failed(row.id, message);
+          if (error instanceof ProviderHttpError && !error.retryable)
+            store.block(
+              row.id,
+              `${error.provider} HTTP ${error.status}; review connection permissions`,
+            );
+          else
+            store.failed(
+              row.id,
+              message,
+              error instanceof ProviderHttpError ? error.retryAt : undefined,
+            );
           errors.push({ destination: adapter.id, error: message });
+          if (
+            error instanceof ProviderHttpError &&
+            [401, 403].includes(error.status)
+          ) {
+            store.blockDestination(
+              group.id,
+              adapter.id,
+              `${error.provider} HTTP ${error.status}; review connection permissions`,
+            );
+            break;
+          }
+          if (!(error instanceof ProviderHttpError) || error.retryable) {
+            store.deferDestination(
+              group.id,
+              adapter.id,
+              error instanceof ProviderHttpError
+                ? (error.retryAt ?? Date.now() + 2000)
+                : Date.now() + 2000,
+            );
+            break;
+          }
         }
       }
     }

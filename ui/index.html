@@ -288,6 +288,7 @@
       <section id="sync" class="view" hidden>
         <div class="panel">
           <h2>Inventory synchronization</h2>
+          <p id="runtime-status" class="hint"></p>
           <p>
             Sync Now can update destinations with read/write permission. Review
             mappings and test with sandbox stores first. Schedules run only
@@ -345,6 +346,22 @@
         </div>
       </section>
       <section id="settings" class="view" hidden>
+        <div class="panel">
+          <h2>Connector support &amp; sync capacity</h2>
+          <p>
+            Connection count and vendor compatibility are separate. Each
+            configured connection uses one of the implemented drivers below;
+            setup-required methods cannot synchronize.
+          </p>
+          <p id="capacity-status" class="hint"></p>
+          <div id="connector-capabilities"></div>
+          <p class="hint">
+            Schedules spread startup across the polling interval and wait for
+            each run to finish. Increase intervals when provider limits or
+            inventory size make runs slow. Queue overflow is reported and
+            deferred to the next scheduled run.
+          </p>
+        </div>
         <div class="panel">
           <h2>Local workspace</h2>
           <p>Default output: <strong>stock.csv + manifest.json</strong></p>

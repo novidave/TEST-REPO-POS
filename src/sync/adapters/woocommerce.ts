@@ -1,3 +1,4 @@
+import { governedFetch, providerFailure } from "../http";
 import { httpsUrl } from "../../security";
 import type { InventoryAdapter, Stock, StockWrite } from "../types";
 export class WooCommerceAdapter implements InventoryAdapter {
@@ -14,7 +15,7 @@ export class WooCommerceAdapter implements InventoryAdapter {
     private readonly baseUrl: string,
     private readonly consumerKey: string,
     private readonly consumerSecret: string,
-    private readonly http: typeof fetch = fetch,
+    private readonly http: typeof fetch = governedFetch,
   ) {
     httpsUrl(baseUrl);
   }
@@ -37,7 +38,7 @@ export class WooCommerceAdapter implements InventoryAdapter {
         },
       },
     );
-    if (!res.ok) throw new Error("WooCommerce HTTP " + res.status);
+    if (!res.ok) throw providerFailure("WooCommerce", res);
     return res;
   }
   async read(): Promise<Stock[]> {
@@ -86,6 +87,33 @@ export class WooCommerceAdapter implements InventoryAdapter {
       if (page === 100) throw new Error("Variation pagination limit reached");
     }
     return out;
+  }
+  async readOne(
+    productKey: string,
+    location: string,
+  ): Promise<Stock | undefined> {
+    if (location !== "default") return undefined;
+    const [product, variant] = productKey.split(":");
+    if (!/^\d+$/.test(product) || !/^\d+$/.test(variant))
+      throw new Error("Invalid product key");
+    const path =
+      "products/" + product + (variant !== "0" ? "/variations/" + variant : "");
+    const item = (await (await this.request(path)).json()) as {
+      manage_stock: boolean;
+      stock_quantity: number | null;
+      sku: string;
+    };
+    if (!item.manage_stock) return undefined;
+    if (!Number.isSafeInteger(item.stock_quantity) || item.stock_quantity! < 0)
+      throw new Error("Incomplete managed stock");
+    return {
+      productKey,
+      sku: item.sku || "",
+      location,
+      onHand: item.stock_quantity,
+      available: item.stock_quantity,
+      observedAt: new Date().toISOString(),
+    };
   }
   async write(updates: StockWrite[]): Promise<void> {
     for (const u of updates) {

@@ -21,9 +21,9 @@ jobs:
       - run: npm test
       - run: npm run native:electron
       - if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:electron
+        run: xvfb-run -a npm run test:electron:scale
       - if: runner.os == 'Windows'
-        run: npm run test:electron
+        run: npm run test:electron:scale
       - if: runner.os == 'Windows'
         run: npm run package:win
       - if: runner.os == 'Linux'

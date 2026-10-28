@@ -353,3 +353,28 @@ test("cloud wizard saves once, tests through the bridge, and clears its API cred
   expect(data.connections.length).toBe(1);
   expect(JSON.stringify(data)).not.toContain("private-api-fixture");
 });
+test("POS dashboard lists and searches 120 configured connections", async ({
+  page,
+}) => {
+  await open(page);
+  await page.evaluate(async () => {
+    for (let i = 0; i < 120; i++)
+      await window.desktop.saveConnection({
+        name: "Scale fixture " + String(i).padStart(3, "0"),
+        platform: "file",
+        permission: "read",
+        stockPath: "fixture.csv",
+      });
+  });
+  await page.locator("#refresh").click();
+  await expect(page.locator("#stat-connections")).toHaveText("120");
+  await page.locator('[data-page="connections"]').click();
+  await expect(page.locator("#connection-list .connection-row")).toHaveCount(
+    120,
+  );
+  await page.locator("#connection-search").fill("Scale fixture 119");
+  await expect(page.locator("#connection-list .connection-row")).toHaveCount(1);
+  await expect(page.locator("#connection-list")).toContainText(
+    "Scale fixture 119",
+  );
+});

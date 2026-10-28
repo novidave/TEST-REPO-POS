@@ -31,6 +31,7 @@ export interface InventoryAdapter {
   readonly platform: Platform;
   readonly capabilities: Capabilities;
   read(): Promise<Stock[]>;
+  readOne?(productKey: string, location: string): Promise<Stock | undefined>;
   write?(updates: StockWrite[]): Promise<void>;
 }
 export interface Member {

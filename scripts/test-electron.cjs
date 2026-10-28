@@ -14,6 +14,8 @@ const { join, resolve } = require("node:path");
       "source_code,name,price,currency,quantity,warehouse,observed_at\nTEST-1,Test fixture only,12,EUR,3,test-warehouse,2026-10-28T12:00:00Z\n",
     );
     const packaged = process.argv.includes("--packaged");
+    const scale = process.argv.includes("--scale");
+    const expectedConnections = scale ? 120 : 1;
     const executablePath = packaged
       ? resolve(
           "release",
@@ -73,6 +75,12 @@ const { join, resolve } = require("node:path");
     );
     const state = await page.evaluate(() => window.desktop.snapshot());
     assert.equal(state.connections.length, 1);
+    assert.equal(state.runtime.groups.concurrency, 4);
+    assert.equal(state.runtime.requests.concurrency, 8);
+    assert.equal(
+      state.connectorCapabilities.find((c) => c.platform === "pos").state,
+      "setup_required",
+    );
     const id = state.connections[0].id;
     assert.equal(state.connections[0].integrationKind, "file");
     assert.deepEqual(state.connections[0].productMappings, {
@@ -108,6 +116,35 @@ const { join, resolve } = require("node:path");
       nodeIntegration: false,
     });
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
+    if (scale) {
+      await page.evaluate(async (path) => {
+        for (let i = 1; i < 120; i++)
+          await window.desktop.saveConnection({
+            id: "scale-" + i,
+            name: "Scale fixture " + String(i).padStart(3, "0"),
+            platform: "file",
+            stockPath: path,
+            permission: "read",
+          });
+      }, input);
+      await page.locator("#refresh").click();
+      await page.waitForFunction(
+        () => document.querySelector("#stat-connections").textContent === "120",
+      );
+      await page.locator('[data-page="connections"]').click();
+      assert.equal(
+        await page.locator("#connection-list .connection-row").count(),
+        120,
+      );
+      await page.locator("#connection-search").fill("Scale fixture 119");
+      assert.equal(
+        await page.locator("#connection-list .connection-row").count(),
+        1,
+      );
+      console.log(
+        "Electron 120-connection IPC, SQLite and rendered-list/search check passed",
+      );
+    }
     const credentialProbe = await application.evaluate(
       async ({ app, safeStorage }) => {
         const require = process
@@ -158,9 +195,13 @@ const { join, resolve } = require("node:path");
     });
     const reopened = await application.firstWindow();
     await reopened.waitForFunction(
-      () => document.querySelector("#stat-connections")?.textContent === "1",
+      (expected) =>
+        document.querySelector("#stat-connections")?.textContent ===
+        String(expected),
+      expectedConnections,
     );
     const restored = await reopened.evaluate(() => window.desktop.snapshot());
+    assert.equal(restored.connections.length, expectedConnections);
     assert.equal(restored.connections[0].id, id);
     assert.equal(restored.connections[0].status, "authenticated_read_ok");
     console.log((packaged ? "Packaged" : "Source") + " profile restart passed");
