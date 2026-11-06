@@ -61,12 +61,34 @@
           </article>
           <article>
             <small>Enabled groups</small><strong id="stat-groups">0</strong
-            ><span>Scheduled while this app is open</span>
+            ><span>Scheduled while the agent runs</span>
           </article>
           <article>
             <small>Outstanding jobs</small><strong id="stat-jobs">0</strong
             ><span>Pending or held for review</span>
           </article>
+        </div>
+        <div class="stats">
+          <article>
+            <small>Last inventory read</small
+            ><strong id="stat-last-read" class="stat-time">—</strong
+            ><span id="stat-last-read-detail">No source read yet</span>
+          </article>
+          <article>
+            <small>Last successful export</small
+            ><strong id="stat-last-export" class="stat-time">—</strong
+            ><span id="stat-interval">No scheduled exports</span>
+          </article>
+          <article>
+            <small>Exported products</small
+            ><strong id="stat-exported">0</strong
+            ><span>In the latest published stock.csv files</span>
+          </article>
+        </div>
+        <div id="overview-alerts"></div>
+        <div class="panel">
+          <h2>Connection health</h2>
+          <div id="overview-health"></div>
         </div>
         <div class="panel">
           <h2>Designed to fail safely</h2>
@@ -82,7 +104,9 @@
           </p>
         </div>
         <div class="panel">
-          <h2>Recent activity</h2>
+          <h2>Recent sync history</h2>
+          <div id="recent-exports"></div>
+          <h3 class="subhead">Recent activity</h3>
           <div id="recent"></div>
         </div>
       </section>
@@ -318,6 +342,11 @@
               ><button type="button" id="choose-file" class="secondary">
                 Choose file
               </button></label
+            ><label data-field="negativeStock"
+              >Negative quantities in source<select name="negativeStock">
+                <option value="reject">Reject the read (default)</option>
+                <option value="zero">Treat as sold out (0)</option>
+              </select></label
             ><label data-field="token"
               >API key / access token<input
                 name="token"
@@ -408,12 +437,36 @@
       </section>
       <section id="sync" class="view" hidden>
         <div class="panel">
-          <h2>Inventory synchronization</h2>
+          <div class="section-heading">
+            <div>
+              <span class="pill">PRIMARY</span>
+              <h2>Automatic folder exports</h2>
+              <p class="muted">
+                Reads each source, validates and normalizes every record, then
+                publishes a complete <strong>stock.csv</strong> and
+                <strong>manifest.json</strong>. Incomplete or invalid reads are
+                held and the previous export stays in place.
+              </p>
+            </div>
+            <div class="actions">
+              <button id="export-all" class="secondary">Export all now</button
+              ><button id="scheduler-toggle">Stop schedules</button>
+            </div>
+          </div>
+          <p id="export-scheduler-status" class="hint"></p>
+          <div id="export-jobs" class="card-grid"></div>
+        </div>
+        <div class="panel">
+          <h2>Export history</h2>
+          <div id="export-history"></div>
+        </div>
+        <div class="panel">
+          <h2>Group synchronization</h2>
           <p id="runtime-status" class="hint"></p>
           <p>
             Sync Now can update destinations with read/write permission. Review
-            mappings and test with sandbox stores first. Schedules run only
-            while this application remains open.
+            mappings and test with sandbox stores first. Schedules keep running
+            in the tray when the window is closed, until you choose Quit.
           </p>
           <p class="hint">
             Failed atomic operations retry with backoff (up to five attempts).
@@ -446,10 +499,81 @@
           </p>
           <div id="inventory-table"></div>
         </div>
+        <div class="panel">
+          <h2>Normalized stock preview</h2>
+          <p class="muted">
+            Exactly what the next export would publish: SKU, EAN, name, selling
+            price, ISO currency, actual quantity and warehouse. Duplicates,
+            invalid prices or currencies and multi-warehouse codes are listed
+            below. Nothing is written.
+          </p>
+          <label
+            >Connection<select id="normalized-connection"></select></label
+          ><button id="preview-normalized">Preview normalized stock</button>
+          <div id="normalized-issues"></div>
+          <div id="normalized-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Product list</h2>
+          <p class="muted">
+            Product identities are stored separately from stock observations.
+            Quantities shown are from the last successful export.
+          </p>
+          <label>Connection<select id="product-connection"></select></label
+          ><label class="sr-only" for="product-search">Search products</label
+          ><input
+            id="product-search"
+            type="search"
+            placeholder="⌕  SKU, EAN or name…"
+          />
+          <div id="product-table"></div>
+        </div>
+        <div class="panel">
+          <h2>Mapping configuration</h2>
+          <p class="muted">
+            Export or import CSV column profiles, negative-stock rules, product
+            and warehouse mappings and export settings. Credentials are never
+            included. Imported export schedules stay disabled until enabled
+            here.
+          </p>
+          <div class="actions">
+            <button id="mapping-export" class="secondary">
+              Export mapping file</button
+            ><button id="mapping-import" class="secondary">
+              Import mapping file
+            </button>
+          </div>
+        </div>
       </section>
       <section id="history" class="view" hidden>
         <div class="panel">
-          <h2>Sync history</h2>
+          <div class="connection-toolbar">
+            <h2>Diagnostic log</h2>
+            <label class="sr-only" for="log-category">Log category</label
+            ><select id="log-category">
+              <option value="all">All categories</option>
+              <option value="connection">Connection attempts</option>
+              <option value="read">Inventory reads</option>
+              <option value="export">Export events</option>
+              <option value="validation">Validation errors</option>
+              <option value="retry">Retries</option>
+              <option value="sync">Group sync</option>
+              <option value="cloud">Cloud</option>
+              <option value="settings">Settings</option>
+              <option value="inventory">Local inventory</option></select
+            ><label class="sr-only" for="log-level">Log level</label
+            ><select id="log-level">
+              <option value="all">All levels</option>
+              <option value="error">Failures</option>
+              <option value="warning">Warnings</option>
+              <option value="info">Info</option></select
+            ><label class="sr-only" for="log-search">Search log</label
+            ><input id="log-search" type="search" placeholder="⌕  Search log…" />
+          </div>
+          <p class="hint">
+            Timestamped, structured entries. Tokens, passwords, keys and
+            credentials are redacted before they are stored.
+          </p>
           <div id="history-table"></div>
         </div>
         <div class="panel">
@@ -467,6 +591,73 @@
         </div>
       </section>
       <section id="settings" class="view" hidden>
+        <form id="settings-form" class="panel">
+          <h2>Agent, startup &amp; synchronization</h2>
+          <div class="form-grid">
+            <label
+              >Default export interval<select name="defaultIntervalPreset">
+                <option value="5">Every 5 minutes</option>
+                <option value="15">Every 15 minutes (default)</option>
+                <option value="30">Every 30 minutes</option>
+                <option value="60">Every 60 minutes</option>
+                <option value="custom">Custom…</option>
+              </select></label
+            ><label data-custom-interval
+              >Custom interval (minutes, 5–1440)<input
+                name="defaultIntervalCustom"
+                type="number"
+                min="5"
+                max="1440"
+                step="1" /></label
+            ><label
+              >Language<select name="language">
+                <option value="en">English</option>
+                <option value="sk">Slovenčina</option>
+                <option value="cs">Čeština</option>
+              </select></label
+            >
+          </div>
+          <label
+            >Export folder<input
+              name="exportRoot"
+              placeholder="Default: application data folder / exports" /><button
+              type="button"
+              id="choose-export-root"
+              class="secondary"
+            >
+              Choose folder</button
+            ><button type="button" id="reset-export-root" class="secondary">
+              Use default
+            </button></label
+          >
+          <p class="hint">
+            Each connection exports into its own subfolder unless a folder is
+            set on its export card.
+          </p>
+          <label class="check"
+            ><input name="openAtLogin" type="checkbox" />Start the agent when I
+            sign in to Windows</label
+          ><label class="check"
+            ><input name="startInBackground" type="checkbox" />When started at
+            sign-in, run in the background (tray) without opening the
+            window</label
+          ><label class="check"
+            ><input name="closeToTray" type="checkbox" />Keep exporting in the
+            background when the window is closed</label
+          >
+          <p id="agent-state" class="hint"></p>
+          <button type="submit">Save settings</button>
+        </form>
+        <div class="panel">
+          <h2>Updates</h2>
+          <p id="app-version"></p>
+          <p class="hint">
+            Updates are installed manually: install the newer package over this
+            one. Settings, connections, encrypted credentials and export
+            history stay in the Windows user profile. No automatic download is
+            performed.
+          </p>
+        </div>
         <div class="panel">
           <h2>Connector support &amp; sync capacity</h2>
           <p>
@@ -488,9 +679,10 @@
           <p>Default output: <strong>stock.csv + manifest.json</strong></p>
           <p id="export-path" class="path"></p>
           <p>
-            Local exports require source code, product name, price, currency and
-            quantity. Multi-warehouse exports require an explicit aggregation
-            policy and are held if product codes repeat.
+            Local exports require source code, product name, selling price, ISO
+            currency and actual quantity. When product codes repeat across
+            warehouses, choose one warehouse on the export card; quantities are
+            never summed.
           </p>
           <p id="secure-state"></p>
           <p class="hint">
@@ -530,6 +722,29 @@
             ><button id="rotate" class="secondary">Rotate credentials</button
             ><button id="unpair" class="secondary">Forget local pairing</button>
           </div>
+          <p id="cloud-health" class="hint"></p>
+          <h3 class="subhead">Optional inventory features</h3>
+          <div class="form-grid">
+            <label
+              >Cloud inventory source<select id="cloud-source"></select></label
+            >
+          </div>
+          <label class="check"
+            ><input id="cloud-snapshots" type="checkbox" />Phase B: offer each
+            verified export to CACADUU as an inventory snapshot</label
+          ><label class="check"
+            ><input id="cloud-commands" type="checkbox" />Phase C: accept
+            CACADUU Sync Now commands (sync_inventory and ping only)</label
+          >
+          <button id="save-cloud-features" class="secondary">
+            Save cloud options
+          </button>
+          <p class="hint">
+            Both are off by default. While the backend answers HTTP 501
+            not_available they show “not yet available”; pairing, local exports
+            and e-commerce sync continue normally. Remote commands never run
+            code, paths or settings.
+          </p>
           <p class="hint">
             Forgetting local pairing does not revoke the device remotely. Use
             Môj obchod to revoke it. HTTP 501 not_available does not disable

@@ -75,6 +75,6 @@ export const connectorCapabilities = [
     write: false,
     twoWay: false,
     detail:
-      "Optional pairing, heartbeat, status and rotation; no active inventory destination",
+      "Optional pairing, heartbeat, status and rotation. Snapshot upload and Sync Now commands are implemented behind settings (off by default) and report not yet available while the backend answers 501",
   },
 ] as const;

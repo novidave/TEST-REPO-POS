@@ -16,12 +16,17 @@ const names = {
   history: "Sync History & Logs",
   settings: "Settings",
 };
+let currentPage = "overview";
+let language = "en";
 function navigate(page) {
+  currentPage = page;
   document.querySelectorAll(".view").forEach((v) => (v.hidden = v.id !== page));
   document
     .querySelectorAll("[data-page]")
     .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
-  $("page-title").textContent = names[page];
+  $("page-title").textContent = t(names[page]);
+  if (page === "mapping" && typeof loadProducts === "function")
+    loadProducts().catch((e) => notice(e.message, true));
 }
 document
   .querySelectorAll("[data-page]")
@@ -74,7 +79,11 @@ function table(target, columns, rows) {
   const body = element("tbody");
   rows.forEach((row) => {
     const tr = element("tr");
-    columns.forEach(([, key]) => tr.append(element("td", row[key] ?? "—")));
+    columns.forEach(([, key, cellClass]) => {
+      const td = element("td", row[key] ?? "—");
+      if (cellClass) td.className = cellClass(row);
+      tr.append(td);
+    });
     body.append(tr);
   });
   t.append(body);
@@ -116,6 +125,27 @@ async function refresh() {
     ? "OS encrypted credential storage is available."
     : "OS secure storage unavailable. Saving credentials and pairing are blocked.";
   $("pair").disabled = c.paired || !c.secureStorage;
+  const cloudNotes = [];
+  if (c.pairAgain) cloudNotes.push("CACADUU revoked or replaced this device token. Pair this computer again.");
+  if (c.updateRequired) cloudNotes.push("CACADUU requires agent version " + c.updateRequired + " or newer. Cloud calls are stopped until you update.");
+  if (Math.abs(c.clockSkewSeconds ?? 0) > 120)
+    cloudNotes.push("This computer's clock differs from CACADUU by " + c.clockSkewSeconds + " s. Correct the Windows time.");
+  if (c.paired)
+    cloudNotes.push(
+      "Last heartbeat: " + (c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toLocaleString() : "not yet") +
+        (c.nextHeartbeatAt ? " · next " + new Date(c.nextHeartbeatAt).toLocaleTimeString() : "") +
+        (c.lastError ? " · last error " + c.lastError : ""),
+    );
+  if (c.paired && c.snapshots)
+    cloudNotes.push(
+      "Snapshots: " + String(c.snapshots).replaceAll("_", " ") +
+        (c.lastSnapshot ? " (last: " + c.lastSnapshot.state.replaceAll("_", " ") + ")" : "") +
+        " · Commands: " + String(c.commands).replaceAll("_", " "),
+    );
+  $("cloud-health").textContent = cloudNotes.join("\n");
+  $("cloud-health").hidden = !cloudNotes.length;
+  for (const note of cloudNotes.slice(0, c.pairAgain || c.updateRequired ? 1 : 0))
+    $("overview-alerts").append(element("div", "◌ " + note, "alert warn"));
   ["status", "heartbeat", "rotate", "unpair"].forEach(
     (id) => ($(id).disabled = !c.paired),
   );
@@ -282,6 +312,7 @@ function render() {
   select.replaceChildren();
   snapshot.connections.forEach((c) => option(select, c.id, c.name));
   if ([...select.options].some((o) => o.value === old)) select.value = old;
+  renderAgent();
 }
 function csvColumns(prefix = "") {
   const columns = {};
@@ -430,7 +461,7 @@ $("wizard-file").addEventListener("input", () => clearCsvHeaders("wizard-"));
 function platformFields() {
   const platform = cf.elements.platform.value;
   const visible = {
-    file: ["stockPath", "csvImport"],
+    file: ["stockPath", "csvImport", "negativeStock"],
     odoo: ["baseUrl", "database", "username", "password"],
     erpnext: ["baseUrl", "token", "secret"],
     woocommerce: ["baseUrl", "token", "secret"],
@@ -483,6 +514,7 @@ function editConnection(c) {
     "permission",
   ])
     if (c[key] !== undefined) cf.elements[key].value = c[key];
+  cf.elements.negativeStock.value = c.negativeStock || "reject";
   cf.elements.shoptetWriteAcknowledged.checked =
     c.shoptetWriteAcknowledged === true;
   cf.elements.platform.disabled = true;
@@ -557,7 +589,10 @@ cf.onsubmit = (e) => {
     ])
       data[key] = cf.elements[key].value;
     try {
-      if (data.platform === "file") data.csvImport = readCsvProfile();
+      if (data.platform === "file") {
+        data.csvImport = readCsvProfile();
+        data.negativeStock = cf.elements.negativeStock.value;
+      }
       if (data.platform === "shoptet") {
         data.shoptetWriteAcknowledged =
           cf.elements.shoptetWriteAcknowledged.checked;
@@ -1444,3 +1479,532 @@ function renderRegionalConnectors() {
   });
 }
 $("regional-country").onchange = renderRegionalConnectors;
+
+// ---------------------------------------------------------------- folder export agent
+const translations = {
+  sk: {
+    Overview: "Prehľad",
+    "POS Connections": "Pokladničné pripojenia",
+    "Connection Groups": "Skupiny pripojení",
+    "Inventory Sync": "Synchronizácia skladu",
+    "Products & Mapping": "Produkty a mapovanie",
+    "Sync History & Logs": "História a záznamy",
+    Settings: "Nastavenia",
+    "YOUR INVENTORY, CONNECTED": "VÁŠ SKLAD, PREPOJENÝ",
+    "↻ Refresh": "↻ Obnoviť",
+    "Automatic folder exports": "Automatický export do priečinka",
+    "Export all now": "Exportovať všetko teraz",
+    "Stop schedules": "Zastaviť plánovanie",
+    "Start schedules": "Spustiť plánovanie",
+    "Export history": "História exportov",
+    "Connection health": "Stav pripojení",
+    "Recent sync history": "Posledné synchronizácie",
+    "Save settings": "Uložiť nastavenia",
+    "Sync Now": "Synchronizovať teraz",
+    "Save schedule": "Uložiť plán",
+    "Open folder": "Otvoriť priečinok",
+  },
+  cs: {
+    Overview: "Přehled",
+    "POS Connections": "Pokladní připojení",
+    "Connection Groups": "Skupiny připojení",
+    "Inventory Sync": "Synchronizace skladu",
+    "Products & Mapping": "Produkty a mapování",
+    "Sync History & Logs": "Historie a záznamy",
+    Settings: "Nastavení",
+    "YOUR INVENTORY, CONNECTED": "VÁŠ SKLAD, PROPOJENÝ",
+    "↻ Refresh": "↻ Obnovit",
+    "Automatic folder exports": "Automatický export do složky",
+    "Export all now": "Exportovat vše nyní",
+    "Stop schedules": "Zastavit plánování",
+    "Start schedules": "Spustit plánování",
+    "Export history": "Historie exportů",
+    "Connection health": "Stav připojení",
+    "Recent sync history": "Poslední synchronizace",
+    "Save settings": "Uložit nastavení",
+    "Sync Now": "Synchronizovat nyní",
+    "Save schedule": "Uložit plán",
+    "Open folder": "Otevřít složku",
+  },
+};
+function t(text) {
+  return translations[language]?.[text] ?? text;
+}
+const originalText = new WeakMap();
+function applyLanguage() {
+  const targets = [
+    ...document.querySelectorAll("[data-page] span"),
+    ...document.querySelectorAll(".view h2, #export-all, #refresh, .eyebrow"),
+    document.querySelector("#settings-form [type=submit]"),
+  ];
+  for (const node of targets) {
+    if (!node) continue;
+    if (!originalText.has(node)) originalText.set(node, node.textContent.trim());
+    node.textContent = t(originalText.get(node));
+  }
+  $("page-title").textContent = t(names[currentPage]);
+  document.documentElement.lang = language;
+}
+const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+const shortHash = (hash) => (hash ? hash.slice(0, 12) + "…" : "—");
+const exportable = (c) =>
+  !["pos", "cacaduu"].includes(c.platform) &&
+  !["setup_required", "configure_in_settings"].includes(c.status);
+const dirtyExportCards = new Set();
+let settingsDirty = false;
+let productCache = { id: null, rows: [] };
+function renderAgent() {
+  language = snapshot.settings?.language ?? "en";
+  renderOverview();
+  renderExports();
+  renderLogs();
+  renderSettings();
+  for (const id of ["normalized-connection", "product-connection"]) {
+    const select = $(id),
+      old = select.value;
+    select.replaceChildren();
+    snapshot.connections
+      .filter(exportable)
+      .forEach((c) => option(select, c.id, c.name));
+    if ([...select.options].some((o) => o.value === old)) select.value = old;
+  }
+  applyLanguage();
+}
+function renderOverview() {
+  const o = snapshot.overview;
+  if (!o) return;
+  $("stat-last-read").textContent = when(o.lastReadAt);
+  $("stat-last-read-detail").textContent = o.lastReadAt
+    ? "Latest successful source read"
+    : "No source read yet";
+  $("stat-last-export").textContent = when(o.lastExportAt);
+  $("stat-interval").textContent = o.intervals.length
+    ? "Every " + o.intervals.join(" / ") + " min" +
+      (snapshot.settings?.schedulerPaused ? " · stopped" : "")
+    : "No scheduled exports";
+  $("stat-exported").textContent = o.exportedProducts;
+  const alerts = $("overview-alerts");
+  alerts.replaceChildren();
+  for (const e of o.errors)
+    alerts.append(element("div", "● " + e.name + ": " + e.message, "alert"));
+  for (const w of o.warnings)
+    alerts.append(element("div", "◌ " + w.message, "alert warn"));
+  const label = {
+    healthy: "● Healthy",
+    error: "● Error",
+    setup_required: "◌ Setup required",
+    unknown: "◌ Not yet read",
+  };
+  table(
+    "overview-health",
+    [
+      ["Connection", "name"],
+      ["Type", "platform"],
+      ["Health", "healthLabel", (r) => "level-" + (r.health === "error" ? "error" : r.health === "healthy" ? "info" : "warning")],
+      ["Last read", "read"],
+      ["Last export", "exported"],
+      ["Products", "exportedCount"],
+      ["Interval", "interval"],
+      ["Next run", "next"],
+      ["Active error", "lastError"],
+    ],
+    o.connections.map((c) => ({
+      ...c,
+      healthLabel: label[c.health],
+      read: when(c.lastReadAt),
+      exported: when(c.lastExportAt),
+      interval: c.intervalMinutes ? c.intervalMinutes + " min" : "Manual",
+      next: when(c.nextRunAt),
+    })),
+  );
+  table(
+    "recent-exports",
+    exportRunColumns,
+    exportRunRows().slice(0, 5),
+  );
+}
+const exportRunColumns = [
+  ["Started", "started"],
+  ["Connection", "connection"],
+  ["Trigger", "trigger"],
+  ["Result", "state", (r) => "level-" + (r.state === "ok" ? "info" : r.state === "held" ? "warning" : r.state === "running" ? "info" : "error")],
+  ["Products", "product_count"],
+  ["SHA-256", "hash"],
+  ["Detail", "message"],
+];
+function exportRunRows() {
+  return (snapshot.exportRuns ?? []).map((r) => ({
+    ...r,
+    started: when(r.started_at),
+    connection: connectionName(r.connection_id),
+    hash: shortHash(r.sha256),
+  }));
+}
+function intervalControls(name, minutes) {
+  const preset = [5, 15, 30, 60].includes(minutes) ? String(minutes) : "custom";
+  const wrap = element("div", undefined, "form-grid");
+  const presetLabel = element("label", "Interval"),
+    select = document.createElement("select");
+  select.name = name + "Preset";
+  [
+    ["5", "Every 5 minutes"],
+    ["15", "Every 15 minutes"],
+    ["30", "Every 30 minutes"],
+    ["60", "Every 60 minutes"],
+    ["custom", "Custom…"],
+  ].forEach(([v, text]) => option(select, v, text));
+  select.value = preset;
+  presetLabel.append(select);
+  const customLabel = element("label", "Minutes (5–1440)"),
+    custom = document.createElement("input");
+  custom.type = "number";
+  custom.min = "5";
+  custom.max = "1440";
+  custom.step = "1";
+  custom.name = name + "Custom";
+  custom.value = String(minutes);
+  customLabel.append(custom);
+  customLabel.hidden = preset !== "custom";
+  select.onchange = () => (customLabel.hidden = select.value !== "custom");
+  wrap.append(presetLabel, customLabel);
+  return wrap;
+}
+function readInterval(root, name) {
+  const preset = root.querySelector(`[name="${name}Preset"]`).value;
+  const value = Number(
+    preset === "custom" ? root.querySelector(`[name="${name}Custom"]`).value : preset,
+  );
+  if (!Number.isInteger(value) || value < 5 || value > 1440)
+    throw new Error("Choose an interval of 5–1440 whole minutes.");
+  return value;
+}
+function renderExports() {
+  const root = $("export-jobs");
+  if (!snapshot.exportJobs) {
+    root.replaceChildren(element("div", "Folder exports are available in the desktop app.", "empty"));
+    return;
+  }
+  const paused = snapshot.settings?.schedulerPaused;
+  $("scheduler-toggle").textContent = t(paused ? "Start schedules" : "Stop schedules");
+  const status = snapshot.exportStatus ?? { running: [], scheduled: [] };
+  $("export-scheduler-status").textContent =
+    (paused
+      ? "Scheduled exports are stopped. Manual Sync Now still works."
+      : `${status.scheduled.length} export schedule(s) active · ${status.running.length} running.`) +
+    " Default output: " + snapshot.exportDirectory + " / <connection ID> / stock.csv + manifest.json";
+  // Keep unsaved edits on cards the user is changing.
+  const kept = new Map();
+  for (const id of dirtyExportCards) {
+    const card = root.querySelector(`[data-export-card="${CSS.escape(id)}"]`);
+    if (card) kept.set(id, card);
+  }
+  root.replaceChildren();
+  const candidates = snapshot.connections.filter(exportable);
+  if (!candidates.length) {
+    root.append(element("div", "Add and test a source connection to configure automatic exports.", "empty"));
+    return;
+  }
+  for (const c of candidates) {
+    if (kept.has(c.id)) {
+      root.append(kept.get(c.id));
+      continue;
+    }
+    const job = snapshot.exportJobs.find((j) => j.connectionId === c.id);
+    const last = (snapshot.exportRuns ?? []).find((r) => r.connection_id === c.id);
+    const lastOk = (snapshot.exportRuns ?? []).find((r) => r.connection_id === c.id && r.state === "ok");
+    const card = element("article", undefined, "card export-card");
+    card.dataset.exportCard = c.id;
+    const badge = element(
+      "span",
+      job?.running ? "RUNNING" : job?.enabled ? (job.consecutiveFailures ? "RETRYING" : "SCHEDULED") : "MANUAL",
+      "badge " + (job?.consecutiveFailures ? "error" : job?.enabled ? "ok" : ""),
+    );
+    card.append(badge, element("h3", c.name), element("p", c.platform + " · " + (c.vendor || c.id), "muted"));
+    const details = element("dl");
+    for (const [term, value] of [
+      ["Last run", last ? when(last.started_at) + " · " + last.state : "Never"],
+      ["Last success", lastOk ? when(lastOk.finished_at) : "—"],
+      ["Products", lastOk?.product_count ?? "—"],
+      ["Checksum", shortHash(lastOk?.sha256)],
+      ["Next run", job?.enabled && !paused ? when(job.nextRunAt) : "—"],
+      ["Folder", job?.effectiveDirectory ?? snapshot.exportDirectory + "/" + c.id],
+    ])
+      details.append(element("dt", term), element("dd", String(value)));
+    if (last && last.state !== "ok" && last.message)
+      details.append(element("dt", "Detail"), element("dd", last.message));
+    card.append(details);
+    const form = element("div");
+    form.append(intervalControls("interval", job?.intervalMinutes ?? snapshot.settings?.defaultIntervalMinutes ?? 15));
+    const grid = element("div", undefined, "form-grid");
+    const folderLabel = element("label", "Export folder (optional)"),
+      folder = document.createElement("input");
+    folder.name = "directory";
+    folder.placeholder = "Default export folder";
+    folder.value = job?.directory ?? "";
+    folderLabel.append(folder);
+    const warehouseLabel = element("label", "Warehouse (optional)"),
+      warehouse = document.createElement("input");
+    warehouse.name = "warehouse";
+    warehouse.placeholder = "Required when SKUs repeat across warehouses";
+    warehouse.value = job?.warehouse ?? "";
+    warehouseLabel.append(warehouse);
+    grid.append(folderLabel, warehouseLabel);
+    form.append(grid);
+    const enabledLabel = element("label", undefined, "check"),
+      enabled = document.createElement("input");
+    enabled.type = "checkbox";
+    enabled.name = "enabled";
+    enabled.checked = Boolean(job?.enabled);
+    enabledLabel.append(enabled, document.createTextNode("Export automatically on this schedule"));
+    const guardLabel = element("label", undefined, "check"),
+      guard = document.createElement("input");
+    guard.type = "checkbox";
+    guard.name = "shrinkGuard";
+    guard.checked = job ? job.shrinkGuard : true;
+    guardLabel.append(guard, document.createTextNode("Hold exports with fewer than half the previous products"));
+    form.append(enabledLabel, guardLabel);
+    form.oninput = form.onchange = () => dirtyExportCards.add(c.id);
+    card.append(form);
+    const actions = element("div", undefined, "actions");
+    actions.append(
+      button(t("Save schedule"), async () => {
+        await window.desktop.saveExportJob({
+          connectionId: c.id,
+          enabled: enabled.checked,
+          intervalMinutes: readInterval(form, "interval"),
+          directory: folder.value.trim() || null,
+          warehouse: warehouse.value.trim() || null,
+          shrinkGuard: guard.checked,
+        });
+        dirtyExportCards.delete(c.id);
+        return enabled.checked ? "Export schedule saved and started." : "Export settings saved. Automatic export is off.";
+      }, false),
+      button("Choose folder", async () => {
+        const path = await window.desktop.chooseFolder();
+        if (path) {
+          folder.value = path;
+          dirtyExportCards.add(c.id);
+        }
+      }),
+      button(t("Sync Now"), async () => exportMessage(await window.desktop.exportNow(c.id))),
+      button(t("Open folder"), () => window.desktop.openExportFolder(c.id)),
+    );
+    if (last?.state === "held" && /products vs/.test(last.message || ""))
+      actions.append(
+        button("Publish held snapshot", async () => {
+          if (!window.confirm("Publish the smaller snapshot? Review the source first: products missing from a complete export are treated as sold out downstream."))
+            return;
+          return exportMessage(await window.desktop.exportNow(c.id, true));
+        }),
+      );
+    card.append(actions);
+    root.append(card);
+  }
+  table("export-history", exportRunColumns, exportRunRows());
+  const sources = $("cloud-source"),
+    current = snapshot.settings?.cloudSourceConnectionId ?? "";
+  sources.replaceChildren();
+  option(sources, "", "None");
+  candidates.forEach((c) => option(sources, c.id, c.name));
+  sources.value = current;
+}
+function exportMessage(result) {
+  if (!result) return;
+  if (result.state === "ok")
+    return `${result.message}. SHA-256 ${shortHash(result.sha256)} → ${result.directory}`;
+  const issues = (result.issues ?? [])
+    .filter((i) => i.severity === "error")
+    .slice(0, 5)
+    .map((i) => "• " + (i.sourceProductId ? i.sourceProductId + ": " : "") + i.message)
+    .join("\n");
+  throw new Error(result.message + (issues ? "\n" + issues : ""));
+}
+function renderLogs() {
+  const logs = snapshot.logs;
+  if (!logs) return;
+  const category = $("log-category").value,
+    level = $("log-level").value,
+    search = $("log-search").value.toLowerCase().trim();
+  table(
+    "history-table",
+    [
+      ["Time", "time"],
+      ["Level", "level", (r) => "level-" + r.level],
+      ["Category", "category"],
+      ["Event", "event"],
+      ["Details", "detail_json"],
+    ],
+    logs
+      .filter(
+        (r) =>
+          (category === "all" || r.category === category) &&
+          (level === "all" || r.level === level) &&
+          (!search || (r.event + " " + r.detail_json).toLowerCase().includes(search)),
+      )
+      .map((r) => ({ ...r, time: new Date(r.created_at).toLocaleString() })),
+  );
+}
+for (const id of ["log-category", "log-level"]) $(id).onchange = renderLogs;
+$("log-search").oninput = renderLogs;
+const sf = $("settings-form");
+function renderSettings() {
+  const s = snapshot.settings;
+  if (!s) return;
+  const app = snapshot.app;
+  $("app-version").textContent = app
+    ? `Version ${app.version} · ${app.platform}`
+    : "Version information is available in the desktop app.";
+  $("agent-state").textContent = !app
+    ? ""
+    : (app.loginItem.supported
+        ? app.loginItem.openAtLogin
+          ? "Registered to start at sign-in. "
+          : "Not registered to start at sign-in. "
+        : "Start at sign-in is supported on Windows and macOS only. ") +
+      (app.tray
+        ? "Tray icon active: closing the window keeps the agent running."
+        : "No system tray available: closing the window quits the agent.");
+  if (settingsDirty) return;
+  const preset = [5, 15, 30, 60].includes(s.defaultIntervalMinutes) ? String(s.defaultIntervalMinutes) : "custom";
+  sf.elements.defaultIntervalPreset.value = preset;
+  sf.elements.defaultIntervalCustom.value = s.defaultIntervalMinutes;
+  sf.querySelector("[data-custom-interval]").hidden = preset !== "custom";
+  sf.elements.language.value = s.language;
+  sf.elements.exportRoot.value = s.exportRoot ?? "";
+  for (const key of ["openAtLogin", "startInBackground", "closeToTray"]) sf.elements[key].checked = s[key];
+  $("cloud-snapshots").checked = s.cloudSnapshotsEnabled;
+  $("cloud-commands").checked = s.cloudCommandsEnabled;
+}
+sf.oninput = sf.onchange = () => {
+  settingsDirty = true;
+  sf.querySelector("[data-custom-interval]").hidden = sf.elements.defaultIntervalPreset.value !== "custom";
+};
+sf.onsubmit = (event) => {
+  event.preventDefault();
+  run(async () => {
+    const preset = sf.elements.defaultIntervalPreset.value;
+    const defaultIntervalMinutes = Number(preset === "custom" ? sf.elements.defaultIntervalCustom.value : preset);
+    await window.desktop.updateSettings({
+      defaultIntervalMinutes,
+      language: sf.elements.language.value,
+      exportRoot: sf.elements.exportRoot.value.trim() || null,
+      openAtLogin: sf.elements.openAtLogin.checked,
+      startInBackground: sf.elements.startInBackground.checked,
+      closeToTray: sf.elements.closeToTray.checked,
+    });
+    settingsDirty = false;
+    return "Settings saved.";
+  }, sf.querySelector("[type=submit]"));
+};
+$("choose-export-root").onclick = () =>
+  run(async () => {
+    const path = await window.desktop.chooseFolder();
+    if (path) {
+      sf.elements.exportRoot.value = path;
+      settingsDirty = true;
+    }
+  });
+$("reset-export-root").onclick = () => {
+  sf.elements.exportRoot.value = "";
+  settingsDirty = true;
+};
+$("save-cloud-features").onclick = () =>
+  run(async () => {
+    await window.desktop.updateSettings({
+      cloudSnapshotsEnabled: $("cloud-snapshots").checked,
+      cloudCommandsEnabled: $("cloud-commands").checked,
+      cloudSourceConnectionId: $("cloud-source").value || null,
+    });
+    return "Cloud options saved.";
+  }, $("save-cloud-features"));
+$("scheduler-toggle").onclick = () =>
+  run(async () => {
+    const paused = !snapshot.settings?.schedulerPaused;
+    await window.desktop.setSchedulerPaused(paused);
+    return paused ? "Scheduled exports stopped. Manual Sync Now still works." : "Scheduled exports started.";
+  }, $("scheduler-toggle"));
+$("export-all").onclick = () =>
+  run(async () => {
+    const ids = (snapshot.exportJobs ?? []).filter((j) => j.enabled).map((j) => j.connectionId);
+    if (!ids.length) return "Enable at least one export schedule first.";
+    const results = await Promise.all(
+      ids.map((id) => window.desktop.exportNow(id).catch((e) => ({ state: "failed", message: e.message }))),
+    );
+    return results.map((r, i) => connectionName(ids[i]) + ": " + r.message).join("\n");
+  }, $("export-all"));
+$("preview-normalized").onclick = () =>
+  run(async () => {
+    const id = $("normalized-connection").value;
+    if (!id) return "Add a readable source connection first.";
+    const preview = await window.desktop.previewNormalized(id);
+    const list = element("ul", undefined, "issue-list");
+    preview.issues.forEach((i) =>
+      list.append(element("li", (i.severity === "error" ? "Error · " : "Warning · ") + (i.sourceProductId ? i.sourceProductId + ": " : "") + i.message, i.severity)),
+    );
+    $("normalized-issues").replaceChildren(list);
+    table(
+      "normalized-table",
+      [
+        ["SKU", "sku"],
+        ["EAN", "ean"],
+        ["Name", "name"],
+        ["Price", "price"],
+        ["Currency", "currency"],
+        ["Quantity", "quantity"],
+        ["Meaning", "quantityKind"],
+        ["Warehouse", "warehouse"],
+        ["Availability", "availabilityStatus"],
+        ["Source updated", "updated"],
+      ],
+      preview.items.map((i) => ({ ...i, updated: when(i.sourceUpdatedAt) })),
+    );
+    return (
+      (preview.complete ? "Complete: " : "Would be held: ") +
+      preview.count + " normalized products from " + preview.warehouses.length +
+      " warehouse(s). " + preview.issues.length + " issue(s). Nothing was written."
+    );
+  }, $("preview-normalized"));
+async function loadProducts() {
+  const id = $("product-connection").value;
+  if (!id || !window.desktop.products) return;
+  const result = await window.desktop.products(id);
+  const stock = new Map(result.lastSnapshot.map((r) => [r.source_product_id, r]));
+  productCache = {
+    id,
+    rows: result.identities.map((p) => ({ ...p, ...stock.get(p.source_product_id), seen: when(p.last_seen_at) })),
+  };
+  renderProducts();
+}
+function renderProducts() {
+  const search = $("product-search").value.toLowerCase().trim();
+  table(
+    "product-table",
+    [
+      ["SKU", "sku"],
+      ["EAN", "ean"],
+      ["Name", "name"],
+      ["Warehouse", "warehouse"],
+      ["Quantity", "quantity"],
+      ["Price", "price"],
+      ["Currency", "currency"],
+      ["Last seen", "seen"],
+    ],
+    productCache.rows.filter(
+      (r) => !search || [r.sku, r.ean, r.name].filter(Boolean).join(" ").toLowerCase().includes(search),
+    ),
+  );
+}
+$("product-connection").onchange = () => loadProducts().catch((e) => notice(e.message, true));
+$("product-search").oninput = renderProducts;
+$("mapping-export").onclick = () =>
+  run(async () => {
+    const result = await window.desktop.exportMapping();
+    return result ? "Mapping configuration saved to " + result.path + ". No credentials included." : undefined;
+  }, $("mapping-export"));
+$("mapping-import").onclick = () =>
+  run(async () => {
+    const result = await window.desktop.importMapping();
+    return result
+      ? `Imported mappings for ${result.connections} connection(s) and ${result.exportJobs} export setting(s). Enable imported schedules on the Inventory Sync page.`
+      : undefined;
+  }, $("mapping-import"));

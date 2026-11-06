@@ -584,10 +584,12 @@ test("unrelated connections remain configurable while a different group is queue
     service.busy.delete(group.id);
   }
 });
-test("regional priorities distinguish 14 requested vendor profiles from implemented drivers", async (t) => {
+test("regional priorities distinguish 18 requested vendor profiles from implemented drivers", async (t) => {
   const { service } = await fixture(t);
   const profiles = service.snapshot().regionalConnectors;
-  assert.equal(profiles.length, 14);
+  assert.equal(profiles.length, 18);
+  for (const id of ["oberon", "mrp", "ikelp"])
+    assert.equal(profiles.find((p) => p.id === id).method, "file");
   assert.ok(
     profiles.every((profile) => profile.nativeState === "setup_required"),
   );
