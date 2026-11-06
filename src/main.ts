@@ -12,7 +12,7 @@ import {
 import { tmpdir, release, type } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { CloudApiError } from "../docs/cloud-api/client/client";
 import { CloudAgent, type CloudSettings } from "./cloud-agent";
 import { DesktopService } from "./desktop";
@@ -296,13 +296,21 @@ async function setup() {
     ),
   );
   handle("desktop:open-export-folder", async (id) => {
+    // Only the export folder of an existing connection, never an arbitrary path (openPath can launch files).
+    const connection = service
+      .connections()
+      .find((c) => c.id === string(id, 200));
+    if (!connection) throw new UserError("Unknown connection");
     const job = service.exports
       .jobs()
-      .find((j) => j.connectionId === string(id, 200));
+      .find((j) => j.connectionId === connection.id);
     const directory =
-      job?.effectiveDirectory ?? join(service.exportRoot(), string(id, 200));
+      job?.effectiveDirectory ?? join(service.exportRoot(), connection.id);
+    const info = await stat(directory).catch(() => null);
+    if (!info?.isDirectory())
+      throw new UserError("Export folder not available yet");
     const error = await shell.openPath(directory);
-    if (error) throw new UserError("Export folder not available yet");
+    if (error) throw new UserError("Export folder could not be opened");
   });
   handle("desktop:mapping-export", async () => {
     const result = await dialog.showSaveDialog(win!, {
