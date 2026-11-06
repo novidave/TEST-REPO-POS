@@ -2,7 +2,7 @@ name: Desktop validation
 on:
   pull_request:
   push:
-    branches: [feature/universal-inventory-sync]
+    branches: [main, "feature/**"]
 permissions:
   contents: read
 jobs:
@@ -24,6 +24,10 @@ jobs:
         run: xvfb-run -a npm run test:electron:scale
       - if: runner.os == 'Windows'
         run: npm run test:electron:scale
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:electron:tray
+      - if: runner.os == 'Windows'
+        run: npm run test:electron:tray
       - if: runner.os == 'Windows'
         run: npm run package:win
       - if: runner.os == 'Linux'

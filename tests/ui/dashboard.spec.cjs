@@ -1,6 +1,7 @@
 const { test, expect } = require("@playwright/test");
 async function open(page) {
   await page.addInitScript(() => {
+    const credentialIds = new Set();
     const data = {
       connections: [],
       groups: [],
@@ -44,6 +45,19 @@ async function open(page) {
     };
     window.desktop = {
       snapshot: async () => structuredClone(data),
+      csvHeaders: async (path, format) => {
+        data.lastHeaderInspection = { path, format };
+        return {
+          headers: [
+            " Code ",
+            "Qty",
+            "Warehouse",
+            "Time",
+            "<img src=x onerror=alert(1)>",
+          ],
+          rowCount: 2,
+        };
+      },
       saveConnection: async (v) => {
         data.connections.push({
           id: "connection-" + (data.connections.length + 1),
@@ -60,12 +74,21 @@ async function open(page) {
           permission: v.permission,
           status: "not_tested",
         });
+        if (v.token) credentialIds.add(data.connections.at(-1).id);
         return structuredClone(data.connections.at(-1));
       },
-      testConnection: async () => ({
-        state: "authenticated_read_ok",
-        count: 1,
-      }),
+      testConnection: async (id) => {
+        const c = data.connections.find((c) => c.id === id);
+        if (
+          c?.platform === "shoptet" &&
+          (!c.shoptetEshopId || !credentialIds.has(id))
+        )
+          return {
+            state: "setup_required",
+            message: "Shoptet API access required",
+          };
+        return { state: "authenticated_read_ok", count: 1 };
+      },
       setGroupEnabled: async (id, enabled) => {
         data.groups.find((g) => g.id === id).enabled = enabled;
         return { state: enabled ? "enabled" : "paused" };
@@ -74,12 +97,20 @@ async function open(page) {
         data.groups.push(v);
         return v;
       },
-      previewFile: async () => ({
-        count: 1,
-        rows: [
-          { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
-        ],
-      }),
+      previewFile: async (path, csvImport) => {
+        data.lastPreview = { path, csvImport };
+        return {
+          count: 1,
+          rows: [
+            {
+              productKey: "SKU-A",
+              sku: "SKU-A",
+              location: "main",
+              quantity: 2,
+            },
+          ],
+        };
+      },
       inspect: async () => [
         { productKey: "SKU-A", sku: "SKU-A", location: "main", quantity: 2 },
       ],
@@ -174,9 +205,11 @@ test("Shoptet and POS forms accurately explain setup requirements", async ({
   for (const platform of ["shoptet", "pos"]) {
     await page.locator('[name="platform"]').selectOption(platform);
     await expect(page.locator("#platform-help")).toContainText(
-      "Setup required",
+      platform === "shoptet" ? "API access required" : "Setup required",
     );
-    await expect(page.locator('[name="permission"]')).toBeDisabled();
+    if (platform === "shoptet")
+      await expect(page.locator('[name="permission"]')).toBeEnabled();
+    else await expect(page.locator('[name="permission"]')).toBeDisabled();
   }
 });
 
@@ -472,4 +505,242 @@ test("ERPNext and Odoo setup stays read-only and clears authentication fields", 
       "private-",
     );
   }
+});
+test("advanced CSV profile previews explicit mappings and restores them when editing", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="name"]').fill("Regional mapped export");
+  await page.locator('[name="stockPath"]').fill("regional.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.locator("#csv-encoding").selectOption("windows-1250");
+  await page.locator("#csv-decimal").selectOption(",");
+  await page
+    .locator("#csv-columns")
+    .fill(
+      "source_code = Kód\nquantity = Počet\nwarehouse = Sklad\nobserved_at = Čas",
+    );
+  await page.locator("#preview-import").click();
+  await expect(page.locator("#notice")).toContainText("Choose whether");
+  await page.locator("#csv-quantity-kind").selectOption("available");
+  await page.locator("#preview-import").click();
+  await expect(page.locator("#notice")).toContainText("Validated 1 stock rows");
+  let state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections).toHaveLength(0);
+  expect(state.lastPreview.csvImport.columns.quantity).toBe("Počet");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].csvImport.encoding).toBe("windows-1250");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.locator("#csv-mode")).toHaveValue("mapped");
+  await expect(page.locator("#csv-columns")).toHaveValue(/quantity = Počet/);
+  await expect(page.locator("#csv-quantity-kind")).toHaveValue("available");
+});
+test("wizard carries mapped CSV format through preview and save without claiming a native regional driver", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="file"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-name").fill("Mapped file");
+  await page.locator("#wizard-file").fill("file.csv");
+  await page.locator("#wizard-csv-mode").selectOption("mapped");
+  await page.locator("#wizard-csv-quantity-kind").selectOption("on_hand");
+  await page
+    .locator("#wizard-csv-columns")
+    .fill(
+      "source_code = Code\nquantity = Qty\nwarehouse = Warehouse\nobserved_at = Time",
+    );
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-preview").click();
+  await expect(page.locator("#wizard-inventory")).toContainText("SKU-A");
+  const preview = (await page.evaluate(() => window.desktop.snapshot()))
+    .lastPreview;
+  expect(preview.csvImport.quantityKind).toBe("on_hand");
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "File read validated",
+  );
+  await page.locator("#wizard-save").click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].platform).toBe("file");
+  expect(state.connections[0].csvImport.columns.quantity).toBe("Qty");
+});
+test("CSV header dropdowns preserve exact whitespace and render untrusted names as text", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="name"]').fill("Header mapping");
+  await page.locator('[name="stockPath"]').fill("sample.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.locator("#csv-load-headers").click();
+  await expect(page.locator("#csv-header-status")).toContainText(
+    "stock not yet validated",
+  );
+  const pane = page.locator("#csv-header-selectors");
+  await expect(pane.locator("select")).toHaveCount(8);
+  await expect(pane.locator("img")).toHaveCount(0);
+  for (const [field, column] of Object.entries({
+    source_code: " Code ",
+    quantity: "Qty",
+    warehouse: "Warehouse",
+    observed_at: "Time",
+  }))
+    await pane.locator(`[data-csv-target="${field}"]`).selectOption(column);
+  await page.locator("#csv-quantity-kind").selectOption("available");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].csvImport.columns.source_code).toBe(" Code ");
+  expect(state.lastHeaderInspection.format).toEqual({
+    delimiter: ";",
+    encoding: "utf-8",
+  });
+});
+test("late header inspection results are discarded after the file format changes", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="stockPath"]').fill("sample.csv");
+  await page.locator("#csv-mode").selectOption("mapped");
+  await page.evaluate(() => {
+    window.desktop.csvHeaders = () =>
+      new Promise((resolve) => {
+        window.releaseInspection = () =>
+          resolve({ headers: ["Code", "Qty"], rowCount: 1 });
+      });
+  });
+  await page.locator("#csv-load-headers").click();
+  await page.waitForFunction(
+    () => typeof window.releaseInspection === "function",
+  );
+  await page.locator("#csv-delimiter").selectOption(";");
+  await page.evaluate(() => window.releaseInspection());
+  await expect(page.locator("#notice")).toContainText("changed");
+  await expect(page.locator("#csv-header-selectors select")).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => window.desktop.snapshot())).connections,
+  ).toHaveLength(0);
+});
+test("Shoptet without API access saves preparation and never claims successful authentication", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="platform"]').selectOption("shoptet");
+  await page.locator('[name="name"]').fill("Shoptet preparation");
+  await expect(page.locator("#platform-help")).toContainText(
+    "API access required",
+  );
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  await page.getByRole("button", { name: "Test read", exact: true }).click();
+  await expect(page.locator("#notice")).toContainText("setup_required");
+  await expect(page.locator("#notice")).not.toContainText(
+    "authenticated_read_ok",
+  );
+});
+test("Shoptet wizard captures shop binding and encrypted-token input with read-only default", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="cloud_api"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-provider").selectOption("Shoptet");
+  await page.locator("#wizard-name").fill("Shoptet test source");
+  await page.locator("#wizard-shoptet-id").fill("123");
+  await page.locator("#wizard-shoptet-access").selectOption("private");
+  await page.locator("#wizard-username").fill("synthetic-shoptet-token");
+  await expect(page.locator("#wizard-permission")).toBeEnabled();
+  await expect(page.locator("#wizard-permission")).toHaveValue("read");
+  await expect(page.locator("#wizard-endpoint")).toBeHidden();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "authenticated_read_ok",
+  );
+  await expect(page.locator("#wizard-username")).toHaveValue("");
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].platform).toBe("shoptet");
+  expect(Number(state.connections[0].shoptetEshopId)).toBe(123);
+  expect(state.connections[0].shoptetAccess).toBe("private");
+  expect(JSON.stringify(state)).not.toContain("synthetic-shoptet-token");
+});
+test("Shoptet advanced form requires deliberate acknowledgement before enabling available-stock updates", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-connection").click();
+  await page.locator('[name="platform"]').selectOption("shoptet");
+  await page.locator('[name="name"]').fill("Shoptet destination");
+  await page.locator('[name="shoptetEshopId"]').fill("123");
+  await page.locator('[name="token"]').fill("synthetic-write-key");
+  await page.locator('[name="permission"]').selectOption("read_write");
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#notice")).toContainText("Acknowledge");
+  expect(
+    (await page.evaluate(() => window.desktop.snapshot())).connections,
+  ).toHaveLength(0);
+  await page.locator('[name="shoptetWriteAcknowledged"]').check();
+  await page
+    .getByRole("button", { name: "Save connection", exact: true })
+    .click();
+  await expect(page.locator("#connection-form")).toBeHidden();
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].permission).toBe("read_write");
+  expect(state.connections[0].shoptetWriteAcknowledged).toBe(true);
+  expect(JSON.stringify(state)).not.toContain("synthetic-write-key");
+});
+test("Shoptet wizard enables master write setup only after quantity/concurrency acknowledgement", async ({
+  page,
+}) => {
+  await open(page);
+  await page.locator('[data-page="connections"]').click();
+  await page.locator("#new-pos-connection").click();
+  await page.locator('#wizard-types [data-integration="cloud_api"]').click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-provider").selectOption("Shoptet");
+  await page.locator("#wizard-name").fill("Shoptet write destination");
+  await page.locator("#wizard-shoptet-id").fill("123");
+  await page.locator("#wizard-username").fill("synthetic-key");
+  await page.locator("#wizard-permission").selectOption("read_write");
+  await page.locator("#wizard-next").click();
+  await expect(page.locator("#wizard-notice")).toContainText("Acknowledge");
+  await page.locator("#wizard-shoptet-write").check();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-next").click();
+  await page.locator("#wizard-test").click();
+  await expect(page.locator("#wizard-test-result")).toContainText(
+    "authenticated_read_ok",
+  );
+  const state = await page.evaluate(() => window.desktop.snapshot());
+  expect(state.connections[0].shoptetWriteAcknowledged).toBe(true);
+  expect(state.connections[0].permission).toBe("read_write");
+  await expect(page.locator("#wizard-username")).toHaveValue("");
 });

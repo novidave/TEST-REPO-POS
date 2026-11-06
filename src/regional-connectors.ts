@@ -175,6 +175,55 @@ export const regionalConnectors: readonly RegionalConnector[] = [
     stockCaveat:
       "Do not create stock quantities from receipts or sales-only records.",
   },
+  // Added for the SK/CZ priority list. No vendor API, schema or COM interface is assumed for any of them.
+  {
+    id: "oberon",
+    name: "OBERON",
+    countries: ["SK"],
+    priority: 1,
+    method: "file",
+    nativeState: "setup_required",
+    access:
+      "Use OBERON's own scheduled stock export to a CSV file, then map its exact columns with an explicit CSV import profile. Direct database access is not used.",
+    stockCaveat:
+      "Verify that the export contains the complete stock of the selected warehouse, selling prices with currency, and a timestamp with timezone.",
+  },
+  {
+    id: "mrp",
+    name: "MRP",
+    countries: ["SK", "CZ"],
+    priority: 2,
+    method: "file",
+    nativeState: "setup_required",
+    access:
+      "DBF data files are not parsed. Export stock to CSV from MRP and map the columns explicitly.",
+    stockCaveat:
+      "Confirm the warehouse scope and that quantities are actual remaining stock.",
+  },
+  {
+    id: "ikelp",
+    name: "iKelp",
+    countries: ["SK"],
+    priority: 2,
+    method: "file",
+    nativeState: "setup_required",
+    access:
+      "No verified iKelp API contract is pinned. A complete stock export saved as CSV can be mapped explicitly; Excel files must be saved as CSV first.",
+    stockCaveat:
+      "Confirm the export lists every product of the warehouse, not only changed items.",
+  },
+  {
+    id: "elcom",
+    name: "ELCOM registers",
+    countries: ["SK", "CZ"],
+    priority: 3,
+    method: "hardware_database",
+    nativeState: "setup_required",
+    access:
+      "No device protocol is implemented. Use the inventory software connected to the register and its stock export instead of the register itself.",
+    stockCaveat:
+      "Cash registers usually hold sales data, not complete warehouse stock.",
+  },
 ];
 export function regionalConnector(id: string) {
   return regionalConnectors.find((profile) => profile.id === id);

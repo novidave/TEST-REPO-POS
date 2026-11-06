@@ -584,10 +584,12 @@ test("unrelated connections remain configurable while a different group is queue
     service.busy.delete(group.id);
   }
 });
-test("regional priorities distinguish 14 requested vendor profiles from implemented drivers", async (t) => {
+test("regional priorities distinguish 18 requested vendor profiles from implemented drivers", async (t) => {
   const { service } = await fixture(t);
   const profiles = service.snapshot().regionalConnectors;
-  assert.equal(profiles.length, 14);
+  assert.equal(profiles.length, 18);
+  for (const id of ["oberon", "mrp", "ikelp"])
+    assert.equal(profiles.find((p) => p.id === id).method, "file");
   assert.ok(
     profiles.every((profile) => profile.nativeState === "setup_required"),
   );
@@ -693,5 +695,383 @@ test("read-only ERP drivers reject write permissions and bind encrypted credenti
   assert.doesNotMatch(
     await readFile(join(dir, "credentials"), "utf8"),
     /private-/,
+  );
+});
+const mappedCsv = {
+  version: 1,
+  delimiter: ";",
+  encoding: "utf-8",
+  decimalSeparator: ",",
+  quantityKind: "on_hand",
+  columns: {
+    source_code: "Code",
+    quantity: "Qty",
+    warehouse: "Warehouse",
+    observed_at: "Time",
+  },
+};
+test("mapped imports preview without saving, persist exact metadata and refuse invalid platform settings", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "regional.csv");
+  await writeFile(
+    path,
+    "Code;Qty;Warehouse;Time\n001;4,00;main;2026-10-28T12:00:00Z",
+  );
+  assert.equal(
+    (await service.previewFile(path, mappedCsv)).rows[0].quantity,
+    4,
+  );
+  assert.equal(service.connections().length, 0);
+  const input = {
+    name: "Regional export",
+    platform: "file",
+    stockPath: path,
+    permission: "read",
+    csvImport: mappedCsv,
+    regionalVendorId: "money_s3",
+  };
+  const c = await service.saveConnection(input);
+  assert.deepEqual(service.connections()[0].csvImport, mappedCsv);
+  assert.equal(
+    (await service.testConnection(c.id)).state,
+    "authenticated_read_ok",
+  );
+  await assert.rejects(service.exportLocal(c.id), /catalogue/);
+  await assert.rejects(
+    service.saveConnection({ ...input, stockPath: "source.xml" }),
+    /CSV file/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...input, platform: "pos" }),
+    /file connection/,
+  );
+  const cleared = await service.saveConnection({
+    ...input,
+    id: c.id,
+    csvImport: null,
+  });
+  assert.equal(cleared.csvImport, undefined);
+});
+test("import profile edits reject outstanding jobs and clear source baselines after reconciliation", async (t) => {
+  const { service } = await fixture(t);
+  const a = await service.saveConnection({
+    id: "a",
+    name: "File",
+    platform: "file",
+    stockPath: "stock.csv",
+    permission: "read",
+    csvImport: mappedCsv,
+  });
+  await service.saveConnection({
+    id: "b",
+    name: "Shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  await service.saveGroup({
+    id: "g",
+    mode: "master",
+    masterId: "a",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "a", role: "source" },
+      { connectionId: "b", role: "destination" },
+    ],
+    mappings: { a: { p: "P" }, b: { p: "P" } },
+    locationMappings: { a: { w: "W" }, b: { w: "W" } },
+  });
+  service.store.saveObservation("g", "a", {
+    productKey: "p",
+    sku: "p",
+    location: "w",
+    available: 2,
+    onHand: null,
+    observedAt: new Date().toISOString(),
+  });
+  const changed = {
+    ...a,
+    csvImport: { ...mappedCsv, quantityKind: "available" },
+  };
+  service.store.enqueue("g", "b", {
+    productKey: "p",
+    location: "w",
+    quantity: 2,
+    operationId: "csv-pending",
+  });
+  await assert.rejects(
+    service.saveConnection(changed),
+    /Reconcile outstanding jobs/,
+  );
+  assert.equal(service.store.previous("g", "a", "p\0w"), 2);
+  service.store.db.prepare("DELETE FROM outbox WHERE group_id=?").run("g");
+  await service.saveConnection(changed);
+  assert.equal(service.store.previous("g", "a", "p\0w"), undefined);
+});
+test("mapped stock-only master sync reaches mock destination despite independent local export validation failure", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "stock.csv");
+  await writeFile(
+    path,
+    "Code;Qty;Warehouse;Time\n001;4;main;2026-10-28T12:00:00Z",
+  );
+  const a = await service.saveConnection({
+    id: "a",
+    name: "File",
+    platform: "file",
+    stockPath: path,
+    permission: "read",
+    csvImport: mappedCsv,
+  });
+  await service.saveConnection({
+    id: "b",
+    name: "Mock shop",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  const original = service.adapter.bind(service);
+  let quantity = 0,
+    writes = 0;
+  service.adapter = async (id) =>
+    id === "a"
+      ? original(id)
+      : {
+          id: "b",
+          platform: "shopify",
+          capabilities: {
+            read: true,
+            write: true,
+            locations: true,
+            webhooks: false,
+            compareAndSwap: true,
+          },
+          read: async () => [
+            {
+              productKey: "remote",
+              sku: "001",
+              location: "warehouse",
+              available: quantity,
+              onHand: null,
+              revision: String(quantity),
+              observedAt: new Date().toISOString(),
+            },
+          ],
+          write: async (updates) => {
+            assert.equal(updates[0].quantity, 4);
+            quantity = 4;
+            writes++;
+          },
+        };
+  await service.saveGroup({
+    id: "csv-master",
+    mode: "master",
+    masterId: a.id,
+    enabled: true,
+    intervalMinutes: 1440,
+    members: [
+      { connectionId: "a", role: "source" },
+      { connectionId: "b", role: "destination" },
+    ],
+    mappings: { a: { "001": "shared" }, b: { remote: "shared" } },
+    locationMappings: { a: { main: "shared" }, b: { warehouse: "shared" } },
+  });
+  const result = await service.sync("csv-master");
+  assert.equal(writes, 1);
+  assert.equal(quantity, 4);
+  assert.equal(
+    result.exportState,
+    "validation_failed_previous_export_preserved",
+  );
+  assert.deepEqual(result.errors, []);
+});
+test("header inspection exposes only format metadata and cannot save connections or export stock", async (t) => {
+  const { service, dir } = await fixture(t),
+    path = join(dir, "headers.csv");
+  await writeFile(path, "Code;Qty\nsensitive-row;invalid-quantity");
+  const result = await service.csvHeaders(path, {
+    delimiter: ";",
+    encoding: "utf-8",
+  });
+  assert.equal(result.rowCount, 1);
+  assert.deepEqual(result.headers, ["Code", "Qty"]);
+  assert.doesNotMatch(JSON.stringify(result), /sensitive-row|invalid-quantity/);
+  assert.equal(service.connections().length, 0);
+  assert.equal(service.snapshot().history.length, 0);
+});
+test("Shoptet native setup encrypts tokens, binds the expected shop and defaults to read only", async (t) => {
+  const { service, dir } = await fixture(t);
+  const c = await service.saveConnection({
+    name: "Shoptet",
+    platform: "shoptet",
+    permission: "read",
+    shoptetEshopId: "123",
+    shoptetAccess: "private",
+    token: "private-token",
+  });
+  assert.equal(c.shoptetEshopId, 123);
+  assert.equal((await service.adapter(c.id)).capabilities.read, true);
+  assert.equal((await service.adapter(c.id)).write, undefined);
+  assert.doesNotMatch(JSON.stringify(service.snapshot()), /private-token/);
+  assert.doesNotMatch(
+    await readFile(join(dir, "credentials"), "utf8"),
+    /private-token/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...c, shoptetEshopId: 456 }),
+    /different e-shop/,
+  );
+  await assert.rejects(
+    service.saveConnection({ ...c, permission: "read_write" }),
+    /Acknowledge Shoptet/,
+  );
+  await assert.rejects(
+    service.saveConnection({
+      name: "Invalid",
+      platform: "shoptet",
+      permission: "read",
+      shoptetEshopId: true,
+    }),
+    /positive integer/,
+  );
+});
+test("Shoptet can be a bound read-only group source but never a destination or two-way member", async (t) => {
+  const { service } = await fixture(t);
+  await service.saveConnection({
+    id: "shoptet-source",
+    name: "Shoptet",
+    platform: "shoptet",
+    permission: "read",
+    shoptetEshopId: 123,
+    shoptetAccess: "private",
+    token: "private-token",
+  });
+  await service.saveConnection({
+    id: "shopify-dest",
+    name: "Mock target",
+    platform: "shopify",
+    permission: "read_write",
+    shopDomain: "shop.myshopify.com",
+    token: "private-token",
+  });
+  const g = {
+    id: "shoptet-group",
+    mode: "master",
+    masterId: "shoptet-source",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "shoptet-source", role: "source" },
+      { connectionId: "shopify-dest", role: "destination" },
+    ],
+    mappings: {
+      "shoptet-source": { "001": "shared" },
+      "shopify-dest": { remote: "shared" },
+    },
+    locationMappings: {
+      "shoptet-source": { 1: "main" },
+      "shopify-dest": { location: "main" },
+    },
+  };
+  await service.saveGroup(g);
+  assert.equal(service.groups()[0].masterId, "shoptet-source");
+  await assert.rejects(
+    service.saveGroup({
+      ...g,
+      id: "bad-destination",
+      masterId: "shopify-dest",
+      members: [
+        { connectionId: "shopify-dest", role: "source" },
+        { connectionId: "shoptet-source", role: "destination" },
+      ],
+    }),
+    /Read-only/,
+  );
+  await assert.rejects(
+    service.saveGroup({
+      ...g,
+      id: "bad-two-way",
+      mode: "two_way",
+      members: g.members.map((m) => ({ ...m, role: "both" })),
+    }),
+    /atomic|Read-only/,
+  );
+});
+test("Shoptet master destination requires deliberate write opt-in and still rejects two-way groups", async (t) => {
+  const { service } = await fixture(t);
+  const input = {
+    id: "shoptet-target",
+    name: "Shoptet target",
+    platform: "shoptet",
+    shoptetEshopId: 123,
+    shoptetAccess: "private",
+    permission: "read_write",
+    token: "private-token",
+  };
+  await assert.rejects(service.saveConnection(input), /Acknowledge/);
+  assert.equal(service.connections().length, 0);
+  await service.saveConnection({ ...input, shoptetWriteAcknowledged: true });
+  const adapter = await service.adapter(input.id);
+  assert.equal(adapter.capabilities.write, true);
+  assert.equal(typeof adapter.write, "function");
+  assert.equal(adapter.capabilities.compareAndSwap, false);
+  await service.saveConnection({
+    id: "file-source",
+    name: "File authority",
+    platform: "file",
+    stockPath: "test.csv",
+    permission: "read",
+  });
+  const group = {
+    id: "master-to-shoptet",
+    mode: "master",
+    masterId: "file-source",
+    enabled: false,
+    intervalMinutes: 5,
+    members: [
+      { connectionId: "file-source", role: "source" },
+      { connectionId: input.id, role: "destination" },
+    ],
+    mappings: {
+      "file-source": { local: "shared" },
+      [input.id]: { "001": "shared" },
+    },
+    locationMappings: {
+      "file-source": { warehouse: "main" },
+      [input.id]: { 1: "main" },
+    },
+  };
+  await service.saveGroup(group);
+  assert.equal(service.groups()[0].members[1].role, "destination");
+  await service.saveConnection({
+    id: "other-writer",
+    name: "Other writer",
+    platform: "shopify",
+    shopDomain: "shop.myshopify.com",
+    permission: "read_write",
+    token: "private-token",
+  });
+  await assert.rejects(
+    service.saveGroup({
+      ...group,
+      id: "bad-two-way",
+      mode: "two_way",
+      members: [
+        { connectionId: input.id, role: "both" },
+        { connectionId: "other-writer", role: "both" },
+      ],
+      mappings: {
+        [input.id]: { "001": "shared" },
+        "other-writer": { remote: "shared" },
+      },
+      locationMappings: {
+        [input.id]: { 1: "main" },
+        "other-writer": { location: "main" },
+      },
+    }),
+    /atomic/,
   );
 });

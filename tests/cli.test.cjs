@@ -52,3 +52,55 @@ test("CLI executes a real file-only export and fails incomplete input", (t) => {
     before,
   );
 });
+test("CLI applies an explicit semicolon/decimal-comma file profile without embedding credential values", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "cli-csv-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, "stock.csv"),
+    config = join(dir, "config.json");
+  writeFileSync(
+    path,
+    "Code;Qty;Warehouse;Time;Name;Price;Currency\n001;2;main;2026-10-28T12:00:00Z;Synthetic item;1,25;EUR",
+  );
+  writeFileSync(
+    config,
+    JSON.stringify({
+      connections: [
+        {
+          id: "file",
+          platform: "file",
+          stockPath: path,
+          csvImport: {
+            version: 1,
+            delimiter: ";",
+            encoding: "utf-8",
+            decimalSeparator: ",",
+            quantityKind: "available",
+            columns: {
+              source_code: "Code",
+              quantity: "Qty",
+              warehouse: "Warehouse",
+              observed_at: "Time",
+              name: "Name",
+              price: "Price",
+              currency: "Currency",
+            },
+          },
+        },
+      ],
+      groups: [],
+      databasePath: join(dir, "state", "db"),
+      exportDirectory: join(dir, "output"),
+    }),
+  );
+  const result = spawnSync(
+    process.execPath,
+    [resolve("dist/src/sync/cli.js"), config],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /"export":"ok"/);
+  assert.match(
+    readFileSync(join(dir, "output/file/stock.csv"), "utf8"),
+    /"001","Synthetic item","","1.25"/,
+  );
+});

@@ -1,3 +1,4 @@
+import type { CsvImportProfile } from "./csv-import";
 import { OdooAdapter } from "./adapters/odoo";
 import { ErpNextAdapter } from "./adapters/erpnext";
 import type { SyncGroup, InventoryAdapter } from "./types";
@@ -11,7 +12,11 @@ export interface ConnectionConfig {
   baseUrl?: string;
   database?: string;
   shopDomain?: string;
+  shoptetEshopId?: number;
+  shoptetAccess?: "private" | "addon";
+  shoptetWriteAcknowledged?: boolean;
   stockPath?: string;
+  csvImport?: CsvImportProfile;
   permission?: "read" | "read_write";
   credentialEnv?: string;
   secretEnv?: string;
@@ -76,9 +81,19 @@ export function createAdapters(
       a = new ShopifyAdapter(c.id, c.shopDomain, token);
     } else if (c.platform === "file") {
       if (!c.stockPath) throw new Error("File path missing");
-      a = new FileInventoryAdapter(c.id, c.stockPath);
-    } else if (c.platform === "shoptet") a = new ShoptetAdapter(c.id);
-    else throw new Error("Unsupported platform");
+      a = new FileInventoryAdapter(c.id, c.stockPath, c.csvImport);
+    } else if (c.platform === "shoptet") {
+      if (c.permission === "read_write" && c.shoptetWriteAcknowledged !== true)
+        throw new Error("Shoptet master-only write acknowledgement required");
+      a = new ShoptetAdapter(
+        c.id,
+        c.shoptetEshopId!,
+        c.shoptetAccess || "private",
+        env[c.credentialEnv ?? ""] || "",
+        undefined,
+        c.permission === "read_write" && c.shoptetWriteAcknowledged === true,
+      );
+    } else throw new Error("Unsupported platform");
     if (c.permission !== "read_write") {
       const original = a;
       a = {

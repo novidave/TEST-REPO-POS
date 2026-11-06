@@ -48,13 +48,24 @@ export const connectorCapabilities = [
     detail: "Verified schema; local stock.csv + manifest export",
   },
   {
-    platform: "shoptet",
-    name: "Shoptet",
-    state: "setup_required",
-    read: false,
+    platform: "local",
+    name: "Local inventory (optional)",
+    state: "implemented",
+    read: true,
     write: false,
     twoWay: false,
-    detail: "Merchant authorization and verified driver required",
+    detail:
+      "Built-in products, locations, adjustments, CSV import and barcode lookup for merchants without a stock system; read-only source for exports and master groups",
+  },
+  {
+    platform: "shoptet",
+    name: "Shoptet",
+    state: "implemented",
+    read: true,
+    write: true,
+    twoWay: false,
+    detail:
+      "Native reads and opt-in master-only available-stock writes; no atomic CAS/two-way; zero-claim whole stock only; merchant API access and staging required",
   },
   {
     platform: "pos",
@@ -74,6 +85,6 @@ export const connectorCapabilities = [
     write: false,
     twoWay: false,
     detail:
-      "Optional pairing, heartbeat, status and rotation; no active inventory destination",
+      "Optional pairing, heartbeat, status and rotation. Snapshot upload and Sync Now commands are implemented behind settings (off by default) and report not yet available while the backend answers 501",
   },
 ] as const;

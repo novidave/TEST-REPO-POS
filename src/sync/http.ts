@@ -2,7 +2,8 @@ import { UserError } from "../security";
 import { WorkQueue } from "./runtime";
 export class ProviderHttpError extends Error {
   constructor(
-    readonly provider: "WooCommerce" | "Shopify" | "ERPNext" | "Odoo",
+    readonly provider:
+      "WooCommerce" | "Shopify" | "ERPNext" | "Odoo" | "Shoptet",
     readonly status: number,
     readonly retryAt?: number,
   ) {
@@ -212,7 +213,7 @@ export const providerRequests = new RequestGovernor();
 export const governedFetch: typeof fetch = (input, init) =>
   providerRequests.request(input, init);
 export function providerFailure(
-  provider: "WooCommerce" | "Shopify" | "ERPNext" | "Odoo",
+  provider: "WooCommerce" | "Shopify" | "ERPNext" | "Odoo" | "Shoptet",
   response: Response,
 ): ProviderHttpError {
   return new ProviderHttpError(

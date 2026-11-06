@@ -2,6 +2,19 @@
 
 The existing Electron scaffold, pinned cloud client, adapters, exporter, planner and SQLite store are retained. `src/desktop.ts` owns desktop configuration, encrypted credential access, schedules, local export and history. `src/main.ts` owns window lifecycle and restricted IPC; the renderer receives explicit safe operations only. `src/security.ts` provides encrypted vault, atomic JSON writes, HTTPS checks and public error handling.
 
+Added for the desktop agent:
+
+| Module                         | Responsibility                                                                                                    |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `src/inventory/normalize.ts`   | The common inventory model and its validation                                                                     |
+| `src/export-service.ts`        | Scheduled, verified folder exports with history, retries, the shrink guard, overlap prevention and restart resume |
+| `src/settings.ts`              | Validated application settings in SQLite                                                                          |
+| `src/redact.ts`                | Structured-log secret redaction and classification                                                                |
+| `src/cloud-agent.ts`           | CACADUU Phase A plus feature-flagged Phase B/C, independently testable with a mocked fetch and clock              |
+| `src/inventory/local-store.ts` | The optional local inventory and its read-only adapter                                                            |
+
+`main.ts` adds the tray and close-to-tray behavior and the Windows login item.
+
 ## Planning and execution
 
 `planGroup` validates complete inventories and explicit product/warehouse identities. Master groups select the configured source; two-way groups require CAS-capable members and compare against the last agreed observation. Conflicting items retain their old baselines. Plan observations and new jobs commit in a single SQLite transaction.
@@ -10,15 +23,15 @@ The existing Electron scaffold, pinned cloud client, adapters, exporter, planner
 
 The bounded runtime admits up to 256 group runs, executes four at once, and locks shared connections in a stable order. Member reads are bounded at four per group; the shared provider transport caps eight HTTP transfers including their bodies, serializes each origin and enforces cooldowns. Startup polling is staggered and never overlaps the previous poll. The [capacity report](SCALABILITY.md) describes the 120-connection tests.
 
-The desktop saves group/connection configuration in SQLite, encrypts credentials separately with OS storage, and reinstalls schedules when opened. Pause/Resume persists independently of editable configuration and retains retry jobs; the runner rechecks pause/shutdown state immediately before each write. An in-flight request can still complete. Configuration mutations serialize against sync startup; active groups protect their own connections while unrelated connections remain editable, stale connection-test results cannot overwrite edits, and shutdown waits for reads, exports and credential/configuration writes. Endpoint identity is immutable for commerce connections. Changing mapping or file-source identity clears stale observation baselines. Processes do not survive app exit. There is no Windows service. Single-instance and per-group guards protect the desktop profile. Do not run a separate CLI process against the same database concurrently.
+The desktop saves group/connection configuration in SQLite, encrypts credentials separately with OS storage, and reinstalls schedules when opened. Pause/Resume persists independently of editable configuration and retains retry jobs; the runner rechecks pause/shutdown state immediately before each write. An in-flight request can still complete. Configuration mutations serialize against sync startup; active groups protect their own connections while unrelated connections remain editable, stale connection-test results cannot overwrite edits, and shutdown waits for reads, exports and credential/configuration writes. Endpoint identity is immutable for commerce connections. Changing mapping or file-source identity clears stale observation baselines. Closing the window keeps the agent running in the tray (configurable); Quit stops it. There is no Windows service; see [WINDOWS.md](WINDOWS.md) for signed-out, sleep and power-off behavior. Single-instance and per-group guards protect the desktop profile. Do not run a separate CLI process against the same database concurrently.
 
 ## Capability boundaries
 
-- File input: explicit CSV/XML handover schema and existing JSON observations. File output: `stock.csv` plus checksum manifest, only with complete catalogue metadata. Duplicate SKU warehouses are not automatically aggregated.
+- File input: explicit CSV/XML handover schema and existing JSON observations. File output: `stock.csv` plus checksum manifest (published manifest-last, see [FOLDER_EXPORT.md](FOLDER_EXPORT.md)), only with complete catalogue metadata and ISO currencies. Duplicate SKU warehouses are never aggregated; one warehouse is selected per export.
 - WooCommerce: master-only reads/writes; lacks CAS and can race concurrent edits even with preflight checks. No sales-ledger semantics or verified catalogue currency.
 - Shopify: inventory item and warehouse pagination, compareQuantity writes. Quantity-based CAS protects a single update, but polling can miss intervening transactions or ABA changes. No live-store certification is claimed.
-- Shoptet and POS: accurate setup-required states. The six-method setup wizard stores vendor references and encrypted credentials but performs no speculative local API request, command execution, GUI clicks or hardware/database access. XLSX/DBF and folder watching remain setup-required. Supported file previews use a narrow IPC operation before a connection is persisted; mapping templates are validated and reused by the explicit group editor.
-- CACADUU: optional Phase A, independent of local synchronization. Pinned contract unchanged. B/C off by default, 501 gracefully unavailable, no implemented inventory-upload/command-execution workflow.
+- Shoptet: native stock API with read-only default and opt-in master-only available-stock updates using private/add-on API token headers, expected e-shop binding, warehouse discovery and paginated supplies; zero-claim whole stock only, no atomic CAS/two-way or add-on OAuth broker; merchant API access and live staging required. See [SHOPTET.md](SHOPTET.md). POS vendors retain accurate setup-required states. The six-method setup wizard stores vendor references and encrypted credentials but performs no speculative local API request, command execution, GUI clicks or hardware/database access. XLSX/DBF and folder watching remain setup-required. Supported file previews use a narrow IPC operation before a connection is persisted; mapping templates are validated and reused by the explicit group editor.
+- CACADUU: optional and independent of local synchronization. The pinned contract is unchanged. Phase A is fully wired. B (snapshot upload from verified exports) and C (`sync_inventory`/`ping` commands only) are implemented behind settings that are off by default. HTTP 501 is gracefully reported as not yet available.
 
 ## Remaining release gates
 

@@ -4,6 +4,16 @@ const assert = require("node:assert/strict");
 const { mkdtemp, writeFile, readFile, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
+let settled = false;
+// A crashed Electron child can leave no pending work; never report that as success.
+process.on("exit", () => {
+  if (!settled) {
+    console.error(
+      "Electron test ended before completion (application crashed?)",
+    );
+    process.exitCode = 1;
+  }
+});
 (async () => {
   const profile = await mkdtemp(join(tmpdir(), "inventory-electron-"));
   let application;
@@ -11,11 +21,11 @@ const { join, resolve } = require("node:path");
     const input = join(profile, "sample.csv");
     await writeFile(
       input,
-      "source_code,name,price,currency,quantity,warehouse,observed_at\nTEST-1,Test fixture only,12,EUR,3,test-warehouse,2026-10-28T12:00:00Z\n",
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;12,50;EUR;3;test-warehouse;2026-10-28T12:00:00Z\n",
     );
     const packaged = process.argv.includes("--packaged");
     const scale = process.argv.includes("--scale");
-    const expectedConnections = scale ? 120 : 1;
+    const expectedConnections = scale ? 120 : 2;
     const executablePath = packaged
       ? resolve(
           "release",
@@ -41,6 +51,30 @@ const { join, resolve } = require("node:path");
     await page.locator("#wizard-next").click();
     await page.locator("#wizard-name").fill("Fixture file");
     await page.locator("#wizard-file").fill(input);
+    await page.locator("#wizard-csv-mode").selectOption("mapped");
+    await page.locator("#wizard-csv-delimiter").selectOption(";");
+    await page.locator("#wizard-csv-decimal").selectOption(",");
+    await page.locator("#wizard-csv-quantity-kind").selectOption("on_hand");
+    await page.locator("#wizard-csv-load-headers").click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#wizard-csv-header-status")
+        .textContent.includes("stock not yet validated"),
+    );
+    for (const [field, header] of Object.entries({
+      source_code: "Kód",
+      name: "Názov",
+      price: "Cena",
+      currency: "Mena",
+      quantity: "Počet",
+      warehouse: "Sklad",
+      observed_at: "Čas",
+    }))
+      await page
+        .locator(
+          '#wizard-csv-header-selectors [data-csv-target="' + field + '"]',
+        )
+        .selectOption(header);
     await page.locator("#wizard-next").click();
     await page.locator("#wizard-preview").click();
     await page.waitForFunction(() =>
@@ -83,6 +117,8 @@ const { join, resolve } = require("node:path");
     );
     const id = state.connections[0].id;
     assert.equal(state.connections[0].integrationKind, "file");
+    assert.equal(state.connections[0].csvImport.columns.source_code, "Kód");
+    assert.equal(state.connections[0].csvImport.quantityKind, "on_hand");
     assert.deepEqual(state.connections[0].productMappings, {
       "TEST-1": "shared-test-product",
     });
@@ -94,13 +130,68 @@ const { join, resolve } = require("node:path");
     assert.match(before, /Test fixture only/);
     await writeFile(
       input,
-      "source_code,name,price,currency,quantity,warehouse,observed_at\nTEST-1,Test fixture only,,EUR,3,test-warehouse,2026-10-28T12:00:00Z\n",
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;;EUR;3;test-warehouse;2026-10-28T12:00:00Z\n",
     );
     await page.getByRole("button", { name: "Export locally" }).click();
     await page.waitForFunction(() =>
       document.querySelector("#notice").classList.contains("error"),
     );
     assert.equal(await readFile(output, "utf8"), before);
+    // Scheduled folder export configured through the real Inventory Sync UI.
+    await writeFile(
+      input,
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;12,50;EUR;4;test-warehouse;2026-10-28T12:00:00Z\nTEST-2;Second fixture;3,00;EUR;0;test-warehouse;2026-10-28T12:00:00Z\n",
+    );
+    await page.locator('[data-page="sync"]').click();
+    const card = page.locator(`[data-export-card="${id}"]`);
+    await card.locator('[name="intervalPreset"]').selectOption("5");
+    await card.locator('[name="enabled"]').check();
+    await card.getByRole("button", { name: "Save schedule" }).click();
+    await page.waitForFunction(() =>
+      document.querySelector("#notice").textContent.includes("schedule saved"),
+    );
+    await page
+      .locator(`[data-export-card="${id}"]`)
+      .getByRole("button", { name: "Sync Now" })
+      .click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#notice")
+        .textContent.includes("Published 2 products"),
+    );
+    const published = await readFile(output, "utf8");
+    const manifest = JSON.parse(
+      await readFile(join(profile, "exports", id, "manifest.json"), "utf8"),
+    );
+    assert.equal(manifest.product_count, 2);
+    assert.equal(manifest.complete, true);
+    assert.equal(
+      manifest.sha256,
+      require("node:crypto")
+        .createHash("sha256")
+        .update(published)
+        .digest("hex"),
+    );
+    assert.match(
+      published,
+      /"TEST-2","Second fixture","","3","EUR","0","test-warehouse","out_of_stock"/,
+    );
+    const exportState = await page.evaluate(() => window.desktop.snapshot());
+    assert.equal(exportState.exportJobs[0].enabled, true);
+    assert.equal(exportState.exportJobs[0].intervalMinutes, 5);
+    assert.ok(
+      exportState.exportJobs[0].nextRunAt,
+      "next scheduled export planned",
+    );
+    assert.equal(exportState.exportRuns[0].state, "ok");
+    assert.equal(exportState.overview.exportedProducts, 2);
+    assert.match(
+      await page.locator("#export-history").textContent(),
+      /manual.*ok.*2/s,
+    );
+    console.log(
+      "Scheduled folder export via UI passed: stock.csv + manifest.json verified",
+    );
     const prefs = await application.evaluate(({ BrowserWindow }) => {
       const p =
         BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
@@ -116,9 +207,22 @@ const { join, resolve } = require("node:path");
       nodeIntegration: false,
     });
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
+    const shoptetSetup = await page.evaluate(async () => {
+      await window.desktop.saveConnection({
+        id: "shoptet-setup",
+        name: "Shoptet setup (no API access)",
+        platform: "shoptet",
+        shoptetEshopId: 123,
+        shoptetAccess: "private",
+        permission: "read_write",
+        shoptetWriteAcknowledged: true,
+      });
+      return window.desktop.testConnection("shoptet-setup");
+    });
+    assert.equal(shoptetSetup.state, "setup_required");
     if (scale) {
       await page.evaluate(async (path) => {
-        for (let i = 1; i < 120; i++)
+        for (let i = 2; i < 120; i++)
           await window.desktop.saveConnection({
             id: "scale-" + i,
             name: "Scale fixture " + String(i).padStart(3, "0"),
@@ -202,17 +306,44 @@ const { join, resolve } = require("node:path");
     );
     const restored = await reopened.evaluate(() => window.desktop.snapshot());
     assert.equal(restored.connections.length, expectedConnections);
+    const restoredShoptet = restored.connections.find(
+      (c) => c.id === "shoptet-setup",
+    );
+    assert.equal(restoredShoptet.shoptetEshopId, 123);
+    assert.equal(restoredShoptet.permission, "read_write");
+    assert.equal(restoredShoptet.shoptetWriteAcknowledged, true);
+    console.log(
+      "Shoptet opt-in setup persisted; missing API access correctly stays setup-required",
+    );
     assert.equal(restored.connections[0].id, id);
     assert.equal(restored.connections[0].status, "authenticated_read_ok");
+    assert.deepEqual(
+      restored.connections[0].csvImport,
+      state.connections[0].csvImport,
+    );
+    assert.equal(restored.exportJobs[0].enabled, true);
+    assert.ok(
+      restored.exportJobs[0].nextRunAt,
+      "export schedule resumed after restart",
+    );
+    assert.equal(
+      restored.exportRuns.filter((r) => r.state === "ok").length >= 1,
+      true,
+    );
     console.log((packaged ? "Packaged" : "Source") + " profile restart passed");
     console.log(
-      "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, invalid-data preservation, sandbox and context isolation",
+      "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, scheduled folder export, invalid-data preservation, schedule resume, sandbox and context isolation",
     );
   } finally {
     if (application) await application.close();
     await rm(profile, { recursive: true, force: true });
   }
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+})()
+  .then(() => {
+    settled = true;
+  })
+  .catch((error) => {
+    settled = true;
+    console.error(error);
+    process.exitCode = 1;
+  });
