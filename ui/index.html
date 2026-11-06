@@ -540,17 +540,18 @@
           </button>
           <h3 class="subhead">Product</h3>
           <form id="local-product-form" class="form-grid">
-            <label>SKU<input name="sku" required maxlength="100" /></label
-            ><label>Name<input name="name" required maxlength="300" /></label
-            ><label>EAN / barcode<input name="ean" maxlength="32" /></label
+            <label>SKU<input name="localSku" required maxlength="100" /></label
+            ><label
+              >Name<input name="localName" required maxlength="300" /></label
+            ><label>EAN / barcode<input name="localEan" maxlength="32" /></label
             ><label
               >Selling price<input
-                name="price"
+                name="localPrice"
                 required
                 inputmode="decimal" /></label
             ><label
               >Currency<input
-                name="currency"
+                name="localCurrency"
                 required
                 maxlength="3"
                 placeholder="EUR" /></label
@@ -560,25 +561,28 @@
           <form id="local-adjust-form" class="form-grid">
             <label
               >SKU or scanned barcode<input
-                name="sku"
+                name="localSku"
                 required
                 autocomplete="off" /></label
             ><label
               >Location<input
-                name="location"
+                name="localLocation"
                 required
                 list="local-locations" /></label
             ><label
-              >Change (+/−)<input name="delta" type="number" step="1" /></label
+              >Change (+/−)<input
+                name="localDelta"
+                type="number"
+                step="1" /></label
             ><label
               >or counted quantity<input
-                name="set"
+                name="localSet"
                 type="number"
                 min="0"
                 step="1" /></label
             ><label
               >Reason<input
-                name="reason"
+                name="localReason"
                 placeholder="Delivery, count, damage…" /></label
             ><button type="submit">Apply adjustment</button>
           </form>

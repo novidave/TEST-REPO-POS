@@ -2228,11 +2228,11 @@ $("local-product-form").onsubmit = (event) => {
   const f = event.target;
   run(async () => {
     const p = await window.desktop.localSaveProduct({
-      sku: f.elements.sku.value,
-      name: f.elements.name.value,
-      ean: f.elements.ean.value,
-      price: f.elements.price.value,
-      currency: f.elements.currency.value.trim().toUpperCase(),
+      sku: f.elements.localSku.value,
+      name: f.elements.localName.value,
+      ean: f.elements.localEan.value,
+      price: f.elements.localPrice.value,
+      currency: f.elements.localCurrency.value.trim().toUpperCase(),
     });
     f.reset();
     await loadLocalInventory();
@@ -2244,22 +2244,22 @@ $("local-adjust-form").onsubmit = (event) => {
   const f = event.target;
   run(async () => {
     const r = await window.desktop.localAdjust({
-      sku: f.elements.sku.value,
-      location: f.elements.location.value,
-      delta: f.elements.delta.value,
-      set: f.elements.set.value,
-      reason: f.elements.reason.value || "adjustment",
+      sku: f.elements.localSku.value,
+      location: f.elements.localLocation.value,
+      delta: f.elements.localDelta.value,
+      set: f.elements.localSet.value,
+      reason: f.elements.localReason.value || "adjustment",
     });
-    f.elements.sku.value = "";
-    f.elements.delta.value = "";
-    f.elements.set.value = "";
+    f.elements.localSku.value = "";
+    f.elements.localDelta.value = "";
+    f.elements.localSet.value = "";
     $("local-lookup-result").hidden = true;
     await loadLocalInventory();
     return `${r.sku} @ ${r.location}: ${r.before} → ${r.after}`;
   }, f.querySelector("[type=submit]"));
 };
 // Barcode scanners type the code and press Enter; show what was found before adjusting.
-$("local-adjust-form").elements.sku.addEventListener(
+$("local-adjust-form").elements.localSku.addEventListener(
   "change",
   async (event) => {
     const value = event.target.value.trim();
