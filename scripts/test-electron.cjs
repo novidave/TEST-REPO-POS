@@ -4,6 +4,14 @@ const assert = require("node:assert/strict");
 const { mkdtemp, writeFile, readFile, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
+let settled = false;
+// A crashed Electron child can leave no pending work; never report that as success.
+process.on("exit", () => {
+  if (!settled) {
+    console.error("Electron test ended before completion (application crashed?)");
+    process.exitCode = 1;
+  }
+});
 (async () => {
   const profile = await mkdtemp(join(tmpdir(), "inventory-electron-"));
   let application;
@@ -264,7 +272,12 @@ const { join, resolve } = require("node:path");
     if (application) await application.close();
     await rm(profile, { recursive: true, force: true });
   }
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+})()
+  .then(() => {
+    settled = true;
+  })
+  .catch((error) => {
+    settled = true;
+    console.error(error);
+    process.exitCode = 1;
+  });

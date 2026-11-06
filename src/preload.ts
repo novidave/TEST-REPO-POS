@@ -18,6 +18,22 @@ const desktop = {
     ipcRenderer.invoke("desktop:save-group", value),
   sync: (id: string) => ipcRenderer.invoke("desktop:sync", id),
   inspect: (id: string) => ipcRenderer.invoke("desktop:inspect", id),
+  chooseFolder: () => ipcRenderer.invoke("desktop:choose-folder"),
+  saveExportJob: (value: unknown) =>
+    ipcRenderer.invoke("desktop:save-export-job", value),
+  exportNow: (id: string, allowShrink?: boolean) =>
+    ipcRenderer.invoke("desktop:export-now", id, allowShrink === true),
+  setSchedulerPaused: (paused: boolean) =>
+    ipcRenderer.invoke("desktop:set-scheduler-paused", paused),
+  updateSettings: (value: unknown) =>
+    ipcRenderer.invoke("desktop:update-settings", value),
+  previewNormalized: (id: string) =>
+    ipcRenderer.invoke("desktop:preview-normalized", id),
+  products: (id?: string) => ipcRenderer.invoke("desktop:products", id ?? null),
+  openExportFolder: (id: string) =>
+    ipcRenderer.invoke("desktop:open-export-folder", id),
+  exportMapping: () => ipcRenderer.invoke("desktop:mapping-export"),
+  importMapping: () => ipcRenderer.invoke("desktop:mapping-import"),
 };
 contextBridge.exposeInMainWorld("desktop", desktop);
 const channels = [
