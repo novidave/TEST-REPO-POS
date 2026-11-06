@@ -20,6 +20,11 @@ import { ShoptetAdapter } from "./sync/adapters/shoptet";
 import { validateStock } from "./sync/engine";
 import { runGroup } from "./sync/runner";
 import { exportStock, exportRows } from "./export";
+import { ExportService } from "./export-service";
+import { SettingsStore, type AppSettings } from "./settings";
+import { normalizeInventory } from "./inventory/normalize";
+import { redact, classify } from "./redact";
+import type { NegativeStockRule } from "./sync/adapters/file";
 import type { GroupConfig } from "./sync/config";
 import type { InventoryAdapter, Platform, SyncGroup } from "./sync/types";
 export interface DesktopConnection {
@@ -34,6 +39,8 @@ export interface DesktopConnection {
   shoptetWriteAcknowledged?: boolean;
   stockPath?: string;
   csvImport?: CsvImportProfile;
+  /** Explicit source rule for negative file quantities; default "reject". */
+  negativeStock?: NegativeStockRule;
   permission: "read" | "read_write";
   status: string;
   integrationKind?:
@@ -64,6 +71,8 @@ export class DesktopService {
   readonly store: SqliteSyncStore;
   readonly scheduler: StaggeredScheduler;
   readonly runtime: SyncCoordinator;
+  readonly settings: SettingsStore;
+  readonly exports: ExportService;
   private busy = new Set<string>();
   private active = 0;
   private closing = false;
@@ -73,6 +82,7 @@ export class DesktopService {
     private readonly vault: CredentialVault,
     options: {
       schedulerClock?: TimerClock;
+      exportClock?: TimerClock;
       syncConcurrency?: number;
       maxPending?: number;
     } = {},
@@ -82,6 +92,23 @@ export class DesktopService {
       options.maxPending ?? 256,
     );
     this.store = new SqliteSyncStore(join(directory, "inventory.db"));
+    this.store.db.exec(
+      "CREATE TABLE IF NOT EXISTS connection_health(connection_id TEXT PRIMARY KEY, last_read_at TEXT, last_read_rows INTEGER, last_error TEXT, last_error_at TEXT)",
+    );
+    this.settings = new SettingsStore(this.store.db);
+    this.exports = new ExportService(
+      this.store.db,
+      {
+        adapter: (id) => this.adapter(id),
+        lock: (ids, action) => this.runtime.run(ids, action),
+        log: (event, detail) => this.log(event, detail),
+        exportRoot: () => this.exportRoot(),
+        paused: () => this.settings.get().schedulerPaused,
+        connectionExists: (id) => this.connections().some((c) => c.id === id),
+        onPublished: (...args) => this.onExportPublished?.(...args),
+      },
+      options.exportClock,
+    );
     this.scheduler = new StaggeredScheduler(
       (id) => this.sync(id),
       options.schedulerClock,
@@ -132,12 +159,43 @@ export class DesktopService {
         .all() as { config_json: string }[]
     ).map((r) => JSON.parse(r.config_json));
   }
+  /** Optional hook for CACADUU Phase B; never required for local exports. */
+  onExportPublished?: NonNullable<
+    ConstructorParameters<typeof ExportService>[1]["onPublished"]
+  >;
+  exportRoot(): string {
+    return this.settings.get().exportRoot ?? join(this.directory, "exports");
+  }
+  /** Structured, redacted audit log. Secrets are removed before anything is stored. */
   log(event: string, detail: Record<string, unknown>) {
+    const now = new Date().toISOString();
+    const safe = redact(detail) as Record<string, unknown>;
     this.store.db
       .prepare(
         "INSERT INTO audit_logs(event,detail_json,created_at) VALUES(?,?,?)",
       )
-      .run(event, JSON.stringify(detail), new Date().toISOString());
+      .run(event, JSON.stringify(safe), now);
+    const id = typeof safe.id === "string" ? safe.id : undefined;
+    if (!id) return;
+    if (event === "read_completed")
+      this.store.db
+        .prepare(
+          "INSERT INTO connection_health(connection_id,last_read_at,last_read_rows) VALUES(?,?,?) ON CONFLICT(connection_id) DO UPDATE SET last_read_at=excluded.last_read_at,last_read_rows=excluded.last_read_rows",
+        )
+        .run(id, now, Number(safe.rows) || null);
+    else if (
+      ["export_failed", "export_held"].includes(event) ||
+      (event === "connection_test" && safe.status === "error")
+    )
+      this.store.db
+        .prepare(
+          "INSERT INTO connection_health(connection_id,last_error,last_error_at) VALUES(?,?,?) ON CONFLICT(connection_id) DO UPDATE SET last_error=excluded.last_error,last_error_at=excluded.last_error_at",
+        )
+        .run(
+          id,
+          String(safe.message ?? (event === "export_held" ? "Snapshot held by validation" : "Read failed")).slice(0, 500),
+          now,
+        );
   }
   snapshot() {
     return {
@@ -168,7 +226,79 @@ export class DesktopService {
           "SELECT group_id,product_key,location,reason,created_at FROM conflicts ORDER BY id DESC LIMIT 100",
         )
         .all(),
-      exportDirectory: join(this.directory, "exports"),
+      exportDirectory: this.exportRoot(),
+      settings: this.settings.get(),
+      exportJobs: this.exports.jobs(),
+      exportRuns: this.exports.history(100),
+      exportStatus: this.exports.status(),
+      overview: this.overview(),
+      logs: (
+        this.store.db
+          .prepare("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 500")
+          .all() as { event: string }[]
+      ).map((r) => ({ ...r, ...classify(r.event) })),
+    };
+  }
+  /** Health per connection for the Overview: reads, exports, errors and schedules. */
+  overview() {
+    const health = new Map(
+      (
+        this.store.db.prepare("SELECT * FROM connection_health").all() as {
+          connection_id: string;
+          last_read_at: string | null;
+          last_read_rows: number | null;
+          last_error: string | null;
+          last_error_at: string | null;
+        }[]
+      ).map((h) => [h.connection_id, h]),
+    );
+    const jobs = new Map(this.exports.jobs().map((j) => [j.connectionId, j]));
+    const connections = this.connections().map((c) => {
+      const h = health.get(c.id);
+      const job = jobs.get(c.id);
+      const last = this.exports.lastSuccessful(c.id) as
+        | { finished_at: string; product_count: number }
+        | undefined;
+      // Active until the next successful export (scheduled jobs) or successful read test.
+      const errorActive = Boolean(
+        h?.last_error && ((job?.consecutiveFailures ?? 0) > 0 || c.status === "error"),
+      );
+      return {
+        id: c.id,
+        name: c.name,
+        platform: c.platform,
+        status: c.status,
+        health:
+          c.status === "setup_required" || c.status === "configure_in_settings"
+            ? "setup_required"
+            : errorActive || c.status === "error"
+              ? "error"
+              : last || c.status === "authenticated_read_ok"
+                ? "healthy"
+                : "unknown",
+        lastReadAt: h?.last_read_at ?? null,
+        lastExportAt: last?.finished_at ?? null,
+        exportedCount: last?.product_count ?? null,
+        intervalMinutes: job?.enabled ? job.intervalMinutes : null,
+        nextRunAt: job?.nextRunAt ?? null,
+        lastError: errorActive ? h!.last_error : null,
+      };
+    });
+    const exported = connections.filter((c) => c.lastExportAt);
+    return {
+      connections,
+      lastReadAt: connections.map((c) => c.lastReadAt).filter(Boolean).sort().pop() ?? null,
+      lastExportAt: exported.map((c) => c.lastExportAt).sort().pop() ?? null,
+      exportedProducts: exported.reduce((n, c) => n + (c.exportedCount ?? 0), 0),
+      intervals: [...new Set(connections.map((c) => c.intervalMinutes).filter(Boolean))],
+      errors: connections.filter((c) => c.lastError).map((c) => ({ id: c.id, name: c.name, message: c.lastError })),
+      warnings: [
+        ...(this.settings.get().schedulerPaused ? [{ message: "Scheduled exports are stopped" }] : []),
+        ...this.exports
+          .jobs()
+          .filter((j) => j.enabled && !this.connections().some((c) => c.id === j.connectionId))
+          .map((j) => ({ message: `Export schedule for missing connection ${j.connectionId}` })),
+      ],
     };
   }
   saveConnection(input: unknown) {
@@ -234,6 +364,12 @@ export class DesktopService {
     if (platform === "file")
       c.stockPath = text(value.stockPath, "Inventory path", 4096);
     const previous = this.connections().find((x) => x.id === id);
+    const negativeStock = value.negativeStock ?? previous?.negativeStock;
+    if (negativeStock !== undefined && negativeStock !== "reject") {
+      if (platform !== "file" || negativeStock !== "zero")
+        throw new UserError("Negative stock rule must be reject or zero for file sources");
+      c.negativeStock = "zero";
+    }
     if (platform === "shoptet") {
       const eshopId = value.shoptetEshopId ?? previous?.shoptetEshopId;
       if (eshopId !== undefined && eshopId !== "") {
@@ -281,6 +417,7 @@ export class DesktopService {
     const fileChanged =
       previous &&
       (previous.stockPath !== c.stockPath ||
+        (previous.negativeStock ?? "reject") !== (c.negativeStock ?? "reject") ||
         JSON.stringify(previous.csvImport) !== JSON.stringify(c.csvImport));
     if (
       previous &&
@@ -432,7 +569,12 @@ export class DesktopService {
     let adapter: InventoryAdapter;
     switch (c.platform) {
       case "file":
-        adapter = new FileInventoryAdapter(c.id, c.stockPath!, c.csvImport);
+        adapter = new FileInventoryAdapter(
+          c.id,
+          c.stockPath!,
+          c.csvImport,
+          c.negativeStock ?? "reject",
+        );
         break;
       case "odoo":
         adapter = new OdooAdapter(
@@ -820,18 +962,119 @@ export class DesktopService {
   exportLocal(id: string) {
     return this.track(() => this.exportLocalNow(id));
   }
+  /** Manual "Export locally" uses the same verified, history-recording path as scheduled exports. */
   private async exportLocalNow(id: string) {
-    const rows = await (await this.adapter(id)).read();
-    validateStock(rows);
-    if (rows.some((r) => !r.product))
-      throw new UserError("Verified catalogue metadata required for export");
-    await exportStock(
-      join(this.directory, "exports", id),
-      exportRows(rows),
-      id,
+    if (!this.connections().some((c) => c.id === id))
+      throw new UserError("Unknown connection");
+    const result = await this.exports.runNow(id, "manual");
+    if (result.state !== "ok") throw new UserError(result.message);
+    return { state: "ok", count: result.count, sha256: result.sha256, directory: result.directory };
+  }
+  saveExportJob(input: unknown) {
+    return this.mutate(() =>
+      this.exports.saveJob(input, this.settings.get().defaultIntervalMinutes),
     );
-    this.log("local_export_completed", { id, count: rows.length });
-    return { state: "ok", count: rows.length };
+  }
+  /** Sync Now for a folder export: returns held/failed states instead of throwing. */
+  exportNow(id: string, allowShrink: unknown = false) {
+    return this.track(async () => {
+      if (!this.connections().some((c) => c.id === id))
+        throw new UserError("Unknown connection");
+      return this.exports.runNow(id, "manual", { allowShrink: allowShrink === true });
+    });
+  }
+  setSchedulerPaused(paused: unknown) {
+    if (typeof paused !== "boolean") throw new UserError("Paused must be a boolean");
+    const settings = this.settings.update({ schedulerPaused: paused });
+    this.log(paused ? "scheduler_stopped" : "scheduler_started", {});
+    this.exports.configure();
+    return { paused: settings.schedulerPaused };
+  }
+  updateSettings(input: unknown): AppSettings {
+    if (input && typeof input === "object" && "cloudSourceConnectionId" in input) {
+      const id = (input as Record<string, unknown>).cloudSourceConnectionId;
+      if (id !== null && !this.connections().some((c) => c.id === id))
+        throw new UserError("Unknown cloud source connection");
+    }
+    const settings = this.settings.update(input);
+    this.log("settings_saved", { keys: Object.keys(input as object) });
+    this.exports.configure();
+    return settings;
+  }
+  /** Normalized preview without writing files or history. */
+  previewNormalized(id: string) {
+    return this.track(async () => {
+      const job = this.exports.job(id);
+      const rows = await (await this.adapter(id)).read();
+      const snapshot = normalizeInventory(id, rows, { warehouse: job?.warehouse ?? null });
+      return {
+        complete: snapshot.complete,
+        count: snapshot.items.length,
+        warehouses: snapshot.warehouses,
+        sourceTime: snapshot.sourceTime,
+        issues: snapshot.issues,
+        items: snapshot.items.slice(0, 1000),
+      };
+    });
+  }
+  products(id?: string) {
+    return {
+      identities: this.exports.products(id),
+      lastSnapshot: id ? this.exports.snapshotItems(id) : [],
+    };
+  }
+  /** Mapping configuration without credentials, for backup or another installation. */
+  mappingConfig() {
+    return {
+      format: "test-repo-pos.mapping.v1",
+      exportedAt: new Date().toISOString(),
+      connections: this.connections().map((c) => ({
+        id: c.id,
+        name: c.name,
+        platform: c.platform,
+        ...(c.csvImport ? { csvImport: c.csvImport } : {}),
+        ...(c.negativeStock ? { negativeStock: c.negativeStock } : {}),
+        ...(c.productMappings ? { productMappings: c.productMappings } : {}),
+        ...(c.warehouseMappings ? { warehouseMappings: c.warehouseMappings } : {}),
+      })),
+      exportJobs: this.exports.jobs().map(({ connectionId, intervalMinutes, warehouse, shrinkGuard, directory }) => ({
+        connectionId,
+        intervalMinutes,
+        warehouse,
+        shrinkGuard,
+        directory,
+      })),
+    };
+  }
+  /** Applies mapping fields to existing connections only. Never creates connections, credentials or schedules. */
+  importMappingConfig(input: unknown) {
+    return this.mutate(async () => {
+      if (!input || typeof input !== "object" || (input as Record<string, unknown>).format !== "test-repo-pos.mapping.v1")
+        throw new UserError("Unsupported mapping file");
+      const v = input as { connections?: unknown; exportJobs?: unknown };
+      if (!Array.isArray(v.connections) || (v.exportJobs !== undefined && !Array.isArray(v.exportJobs)))
+        throw new UserError("Unsupported mapping file");
+      const existing = new Map(this.connections().map((c) => [c.id, c]));
+      let connections = 0,
+        jobs = 0;
+      for (const item of v.connections as Record<string, unknown>[]) {
+        const current = existing.get(item?.id as string);
+        if (!current || current.platform !== item.platform) continue;
+        const patch: Record<string, unknown> = { ...current };
+        for (const key of ["csvImport", "negativeStock", "productMappings", "warehouseMappings"])
+          if (key in item) patch[key] = item[key];
+        await this.saveConnectionNow(patch);
+        connections++;
+      }
+      for (const item of (v.exportJobs ?? []) as Record<string, unknown>[]) {
+        if (!existing.has(item?.connectionId as string)) continue;
+        // Imported schedules stay disabled until enabled on this computer.
+        await this.exports.saveJob({ ...item, enabled: false }, this.settings.get().defaultIntervalMinutes);
+        jobs++;
+      }
+      this.log("mapping_imported", { connections, exportJobs: jobs });
+      return { connections, exportJobs: jobs };
+    });
   }
   csvHeaders(path: unknown, format: unknown) {
     return this.track(() =>
@@ -877,6 +1120,7 @@ export class DesktopService {
   async restartSchedules() {
     if (this.closing) return;
     this.scheduler.configure(this.groups());
+    this.exports.configure();
   }
   close(): Promise<void> {
     if (this.shutdown) return this.shutdown;
@@ -884,6 +1128,7 @@ export class DesktopService {
     this.scheduler.stopAll();
     this.runtime.close();
     this.shutdown = (async () => {
+      await this.exports.close();
       if (this.active)
         await new Promise<void>((resolve) => this.idle.push(resolve));
       this.store.close();

@@ -12,6 +12,7 @@ import { stockCsv, type StockRow } from "../../export";
 import { validateStock } from "../engine";
 import type { InventoryAdapter, Stock } from "../types";
 const maxBytes = 16 * 1024 * 1024;
+export type NegativeStockRule = "reject" | "zero";
 async function boundedBytes(path: string): Promise<Buffer> {
   const file = await open(path, "r");
   try {
@@ -51,14 +52,28 @@ export class FileInventoryAdapter implements InventoryAdapter {
     compareAndSwap: false,
   };
   private readonly csvImport?: CsvImportProfile;
+  /** Rows whose negative source quantity was set to 0 by the explicit "zero" rule in the last read. */
+  negativeRowsZeroed = 0;
   constructor(
     readonly id: string,
     private readonly path: string,
     csvImport?: CsvImportProfile,
+    private readonly negativeStock: NegativeStockRule = "reject",
   ) {
     if (csvImport !== undefined) this.csvImport = validateCsvImport(csvImport);
+    if (!["reject", "zero"].includes(negativeStock))
+      throw new UserError("Invalid negative stock rule");
+  }
+  /** Negative quantities are refused unless the connection explicitly maps them to sold out (0). */
+  private negative(value: number): number {
+    if (this.negativeStock === "zero" && Number.isSafeInteger(value) && value < 0) {
+      this.negativeRowsZeroed++;
+      return 0;
+    }
+    return value;
   }
   async read(): Promise<Stock[]> {
+    this.negativeRowsZeroed = 0;
     const bytes = await boundedBytes(this.path);
     const text = new TextDecoder(this.csvImport?.encoding ?? "utf-8", {
       fatal: true,
@@ -131,7 +146,16 @@ export class FileInventoryAdapter implements InventoryAdapter {
           throw new UserError(
             "Mapped CSV timestamps require ISO 8601 with an explicit timezone",
           );
-        r.quantity = csvNumber(r.quantity, profile.decimalSeparator);
+        const rawQuantity =
+          typeof r.quantity === "string" ? r.quantity.trim() : r.quantity;
+        r.quantity =
+          this.negativeStock === "zero" &&
+          typeof rawQuantity === "string" &&
+          rawQuantity.startsWith("-")
+            ? this.negative(
+                -csvNumber(rawQuantity.slice(1), profile.decimalSeparator),
+              )
+            : csvNumber(rawQuantity, profile.decimalSeparator);
         if (profile.columns.price)
           r.price = csvNumber(r.price, profile.decimalSeparator);
         if (!profile.columns.name)
@@ -157,7 +181,7 @@ export class FileInventoryAdapter implements InventoryAdapter {
         ean: r.ean === undefined ? undefined : String(r.ean),
         price: number(r.price),
         currency: String(r.currency ?? ""),
-        quantity: number(r.quantity),
+        quantity: this.negative(number(r.quantity)),
       };
       stockCsv([product]);
       return {
