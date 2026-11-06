@@ -8,7 +8,9 @@ let settled = false;
 // A crashed Electron child can leave no pending work; never report that as success.
 process.on("exit", () => {
   if (!settled) {
-    console.error("Electron test ended before completion (application crashed?)");
+    console.error(
+      "Electron test ended before completion (application crashed?)",
+    );
     process.exitCode = 1;
   }
 });
@@ -135,6 +137,61 @@ process.on("exit", () => {
       document.querySelector("#notice").classList.contains("error"),
     );
     assert.equal(await readFile(output, "utf8"), before);
+    // Scheduled folder export configured through the real Inventory Sync UI.
+    await writeFile(
+      input,
+      "Kód;Názov;Cena;Mena;Počet;Sklad;Čas\nTEST-1;Test fixture only;12,50;EUR;4;test-warehouse;2026-10-28T12:00:00Z\nTEST-2;Second fixture;3,00;EUR;0;test-warehouse;2026-10-28T12:00:00Z\n",
+    );
+    await page.locator('[data-page="sync"]').click();
+    const card = page.locator(`[data-export-card="${id}"]`);
+    await card.locator('[name="intervalPreset"]').selectOption("5");
+    await card.locator('[name="enabled"]').check();
+    await card.getByRole("button", { name: "Save schedule" }).click();
+    await page.waitForFunction(() =>
+      document.querySelector("#notice").textContent.includes("schedule saved"),
+    );
+    await page
+      .locator(`[data-export-card="${id}"]`)
+      .getByRole("button", { name: "Sync Now" })
+      .click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#notice")
+        .textContent.includes("Published 2 products"),
+    );
+    const published = await readFile(output, "utf8");
+    const manifest = JSON.parse(
+      await readFile(join(profile, "exports", id, "manifest.json"), "utf8"),
+    );
+    assert.equal(manifest.product_count, 2);
+    assert.equal(manifest.complete, true);
+    assert.equal(
+      manifest.sha256,
+      require("node:crypto")
+        .createHash("sha256")
+        .update(published)
+        .digest("hex"),
+    );
+    assert.match(
+      published,
+      /"TEST-2","Second fixture","","3","EUR","0","test-warehouse","out_of_stock"/,
+    );
+    const exportState = await page.evaluate(() => window.desktop.snapshot());
+    assert.equal(exportState.exportJobs[0].enabled, true);
+    assert.equal(exportState.exportJobs[0].intervalMinutes, 5);
+    assert.ok(
+      exportState.exportJobs[0].nextRunAt,
+      "next scheduled export planned",
+    );
+    assert.equal(exportState.exportRuns[0].state, "ok");
+    assert.equal(exportState.overview.exportedProducts, 2);
+    assert.match(
+      await page.locator("#export-history").textContent(),
+      /manual.*ok.*2/s,
+    );
+    console.log(
+      "Scheduled folder export via UI passed: stock.csv + manifest.json verified",
+    );
     const prefs = await application.evaluate(({ BrowserWindow }) => {
       const p =
         BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
@@ -264,9 +321,18 @@ process.on("exit", () => {
       restored.connections[0].csvImport,
       state.connections[0].csvImport,
     );
+    assert.equal(restored.exportJobs[0].enabled, true);
+    assert.ok(
+      restored.exportJobs[0].nextRunAt,
+      "export schedule resumed after restart",
+    );
+    assert.equal(
+      restored.exportRuns.filter((r) => r.state === "ok").length >= 1,
+      true,
+    );
     console.log((packaged ? "Packaged" : "Source") + " profile restart passed");
     console.log(
-      "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, invalid-data preservation, sandbox and context isolation",
+      "Electron end-to-end passed: real IPC, POS wizard, real file preview, mapping templates, read test, SQLite persistence, local export, scheduled folder export, invalid-data preservation, schedule resume, sandbox and context isolation",
     );
   } finally {
     if (application) await application.close();

@@ -61,7 +61,8 @@ export function validDirectory(value: unknown): string {
   return value.trim();
 }
 const bool = (value: unknown, label: string) => {
-  if (typeof value !== "boolean") throw new UserError(label + " must be on or off");
+  if (typeof value !== "boolean")
+    throw new UserError(label + " must be on or off");
   return value;
 };
 export class SettingsStore {
@@ -93,7 +94,8 @@ export class SettingsStore {
     for (const [key, value] of Object.entries(v)) {
       switch (key) {
         case "exportRoot":
-          next.exportRoot = value === null || value === "" ? null : validDirectory(value);
+          next.exportRoot =
+            value === null || value === "" ? null : validDirectory(value);
           break;
         case "defaultIntervalMinutes":
           next.defaultIntervalMinutes = validInterval(value);
@@ -112,7 +114,10 @@ export class SettingsStore {
           next.language = value as AppSettings["language"];
           break;
         case "cloudSourceConnectionId":
-          if (value !== null && (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(value)))
+          if (
+            value !== null &&
+            (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,200}$/.test(value))
+          )
             throw new UserError("Invalid cloud source connection");
           next.cloudSourceConnectionId = value as string | null;
           break;

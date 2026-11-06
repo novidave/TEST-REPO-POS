@@ -132,7 +132,10 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   directoryFor(job: Pick<ExportJobConfig, "connectionId" | "directory">) {
     return job.directory ?? join(this.deps.exportRoot(), job.connectionId);
   }
-  async saveJob(input: unknown, defaultInterval = 15): Promise<ExportJobConfig> {
+  async saveJob(
+    input: unknown,
+    defaultInterval = 15,
+  ): Promise<ExportJobConfig> {
     if (!input || typeof input !== "object" || Array.isArray(input))
       throw new UserError("Export settings required");
     const v = input as Record<string, unknown>;
@@ -142,7 +145,10 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
     const previous = this.job(id);
     const job: ExportJobConfig = {
       connectionId: id,
-      enabled: typeof v.enabled === "boolean" ? v.enabled : (previous?.enabled ?? false),
+      enabled:
+        typeof v.enabled === "boolean"
+          ? v.enabled
+          : (previous?.enabled ?? false),
       intervalMinutes: validInterval(
         v.intervalMinutes ?? previous?.intervalMinutes ?? defaultInterval,
       ),
@@ -159,10 +165,14 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
             ? null
             : this.text(v.warehouse, "Warehouse", 80),
       shrinkGuard:
-        typeof v.shrinkGuard === "boolean" ? v.shrinkGuard : (previous?.shrinkGuard ?? true),
+        typeof v.shrinkGuard === "boolean"
+          ? v.shrinkGuard
+          : (previous?.shrinkGuard ?? true),
     };
     if (this.running.has(id))
-      throw new UserError("Wait for the running export to finish before editing it");
+      throw new UserError(
+        "Wait for the running export to finish before editing it",
+      );
     await this.probe(this.directoryFor(job));
     this.db
       .prepare(
@@ -188,7 +198,12 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
     return job;
   }
   private text(value: unknown, label: string, max: number) {
-    if (typeof value !== "string" || !value.trim() || value.length > max || /[\0\r\n]/.test(value))
+    if (
+      typeof value !== "string" ||
+      !value.trim() ||
+      value.length > max ||
+      /[\0\r\n]/.test(value)
+    )
       throw new UserError(label + " is invalid");
     return value;
   }
@@ -205,22 +220,34 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   }
   removeJob(connectionId: string) {
     this.cancel(connectionId);
-    this.db.prepare("DELETE FROM export_jobs WHERE connection_id=?").run(connectionId);
+    this.db
+      .prepare("DELETE FROM export_jobs WHERE connection_id=?")
+      .run(connectionId);
   }
   history(limit = 100, connectionId?: string) {
     return connectionId
       ? this.db
-          .prepare("SELECT * FROM export_runs WHERE connection_id=? ORDER BY id DESC LIMIT ?")
+          .prepare(
+            "SELECT * FROM export_runs WHERE connection_id=? ORDER BY id DESC LIMIT ?",
+          )
           .all(connectionId, limit)
-      : this.db.prepare("SELECT * FROM export_runs ORDER BY id DESC LIMIT ?").all(limit);
+      : this.db
+          .prepare("SELECT * FROM export_runs ORDER BY id DESC LIMIT ?")
+          .all(limit);
   }
   lastSuccessful(connectionId?: string) {
     return (
       connectionId
         ? this.db
-            .prepare("SELECT * FROM export_runs WHERE state='ok' AND connection_id=? ORDER BY id DESC LIMIT 1")
+            .prepare(
+              "SELECT * FROM export_runs WHERE state='ok' AND connection_id=? ORDER BY id DESC LIMIT 1",
+            )
             .get(connectionId)
-        : this.db.prepare("SELECT * FROM export_runs WHERE state='ok' ORDER BY id DESC LIMIT 1").get()
+        : this.db
+            .prepare(
+              "SELECT * FROM export_runs WHERE state='ok' ORDER BY id DESC LIMIT 1",
+            )
+            .get()
     ) as Record<string, unknown> | undefined;
   }
   /** Last published (valid) snapshot rows joined with their separately stored product identities. */
@@ -234,9 +261,15 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   products(connectionId?: string, limit = 1000) {
     return connectionId
       ? this.db
-          .prepare("SELECT * FROM product_identities WHERE connection_id=? ORDER BY sku LIMIT ?")
+          .prepare(
+            "SELECT * FROM product_identities WHERE connection_id=? ORDER BY sku LIMIT ?",
+          )
           .all(connectionId, limit)
-      : this.db.prepare("SELECT * FROM product_identities ORDER BY connection_id,sku LIMIT ?").all(limit);
+      : this.db
+          .prepare(
+            "SELECT * FROM product_identities ORDER BY connection_id,sku LIMIT ?",
+          )
+          .all(limit);
   }
   isRunning(connectionId: string) {
     return this.running.has(connectionId);
@@ -247,17 +280,25 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
     trigger: ExportTrigger = "manual",
     options: { allowShrink?: boolean; snapshotId?: string } = {},
   ): Promise<ExportRunResult> {
-    if (this.closed) return Promise.reject(new UserError("Application is closing"));
+    if (this.closed)
+      return Promise.reject(new UserError("Application is closing"));
     if (this.running.has(connectionId)) {
       if (trigger === "manual" || trigger === "cloud_command")
-        return Promise.reject(new UserError("An export for this connection is already running"));
+        return Promise.reject(
+          new UserError("An export for this connection is already running"),
+        );
       this.deps.log("export_skipped_overlap", { id: connectionId, trigger });
-      return Promise.resolve({ state: "skipped", message: "Previous export still running" });
+      return Promise.resolve({
+        state: "skipped",
+        message: "Previous export still running",
+      });
     }
-    const operation = this.execute(connectionId, trigger, options).finally(() => {
-      this.running.delete(connectionId);
-      this.reschedule(connectionId);
-    });
+    const operation = this.execute(connectionId, trigger, options).finally(
+      () => {
+        this.running.delete(connectionId);
+        this.reschedule(connectionId);
+      },
+    );
     this.running.set(connectionId, operation);
     return operation;
   }
@@ -291,7 +332,12 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
     const finish = (
       state: "ok" | "held" | "failed",
       message: string,
-      extra: { count?: number; sha256?: string; snapshotId?: string; sourceTime?: string | null } = {},
+      extra: {
+        count?: number;
+        sha256?: string;
+        snapshotId?: string;
+        sourceTime?: string | null;
+      } = {},
     ) => {
       this.db
         .prepare(
@@ -340,7 +386,8 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
           { warehouse: job.warehouse },
           new Date(this.clock.now()),
         );
-        const zeroed = (adapter as { negativeRowsZeroed?: number }).negativeRowsZeroed;
+        const zeroed = (adapter as { negativeRowsZeroed?: number })
+          .negativeRowsZeroed;
         this.deps.log("read_completed", {
           id: connectionId,
           rows: rows.length,
@@ -356,11 +403,18 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
             id: connectionId,
             trigger,
             errors: errors.length,
-            first: errors.slice(0, 5).map((e) => ({ code: e.code, sku: e.sourceProductId, message: e.message })),
+            first: errors
+              .slice(0, 5)
+              .map((e) => ({
+                code: e.code,
+                sku: e.sourceProductId,
+                message: e.message,
+              })),
           });
           return { state: "held", runId, message, issues: snapshot.issues };
         }
-        const previous = this.lastSuccessful(connectionId) as { product_count?: number } | undefined;
+        const previous = this.lastSuccessful(connectionId) as
+          { product_count?: number } | undefined;
         if (
           job.shrinkGuard &&
           !options.allowShrink &&
@@ -369,13 +423,30 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
         ) {
           const message = `Held: ${snapshot.items.length} products vs ${previous.product_count} in the last export. Review and publish manually if correct. Previous export preserved.`;
           finish("held", message, { count: snapshot.items.length });
-          this.deps.log("export_held", { id: connectionId, trigger, reason: "shrinking", count: snapshot.items.length, previous: previous.product_count });
-          return { state: "held", runId, message, count: snapshot.items.length, issues: snapshot.issues };
+          this.deps.log("export_held", {
+            id: connectionId,
+            trigger,
+            reason: "shrinking",
+            count: snapshot.items.length,
+            previous: previous.product_count,
+          });
+          return {
+            state: "held",
+            runId,
+            message,
+            count: snapshot.items.length,
+            issues: snapshot.issues,
+          };
         }
-        const result = await exportStock(directory, handoverRows(snapshot), connectionId, {
-          snapshotId: options.snapshotId,
-          sourceTime: snapshot.sourceTime,
-        });
+        const result = await exportStock(
+          directory,
+          handoverRows(snapshot),
+          connectionId,
+          {
+            snapshotId: options.snapshotId,
+            sourceTime: snapshot.sourceTime,
+          },
+        );
         this.db.transaction(() => {
           finish("ok", "Published", {
             count: result.productCount,
@@ -385,7 +456,9 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
           });
           this.storeSnapshot(connectionId, result.snapshotId, snapshot);
         })();
-        const warnings = snapshot.issues.filter((i) => i.severity === "warning");
+        const warnings = snapshot.issues.filter(
+          (i) => i.severity === "warning",
+        );
         this.deps.log("export_published", {
           id: connectionId,
           trigger,
@@ -396,10 +469,18 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
           warnings: warnings.length,
         });
         try {
-          await this.deps.onPublished?.(connectionId, snapshot, result, trigger);
+          await this.deps.onPublished?.(
+            connectionId,
+            snapshot,
+            result,
+            trigger,
+          );
         } catch (e) {
           // Optional destinations never affect the local export result.
-          this.deps.log("cloud_snapshot_failed", { id: connectionId, message: publicError(e) });
+          this.deps.log("cloud_snapshot_failed", {
+            id: connectionId,
+            message: publicError(e),
+          });
         }
         return {
           state: "ok",
@@ -419,14 +500,30 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
       return { state: "failed", runId, message };
     }
   }
-  private storeSnapshot(connectionId: string, snapshotId: string, snapshot: NormalizedSnapshot) {
+  private storeSnapshot(
+    connectionId: string,
+    snapshotId: string,
+    snapshot: NormalizedSnapshot,
+  ) {
     const identity = this.db.prepare(
       "INSERT INTO product_identities VALUES(?,?,?,?,?,?,?) ON CONFLICT(connection_id,source_product_id) DO UPDATE SET sku=excluded.sku,ean=excluded.ean,name=excluded.name,last_seen_at=excluded.last_seen_at",
     );
-    const item = this.db.prepare("INSERT INTO snapshot_items VALUES(?,?,?,?,?,?,?,?,?,?,?)");
-    this.db.prepare("DELETE FROM snapshot_items WHERE connection_id=?").run(connectionId);
+    const item = this.db.prepare(
+      "INSERT INTO snapshot_items VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+    );
+    this.db
+      .prepare("DELETE FROM snapshot_items WHERE connection_id=?")
+      .run(connectionId);
     for (const i of snapshot.items) {
-      identity.run(connectionId, i.sourceProductId, i.sku, i.ean, i.name, i.snapshotAt, i.snapshotAt);
+      identity.run(
+        connectionId,
+        i.sourceProductId,
+        i.sku,
+        i.ean,
+        i.name,
+        i.snapshotAt,
+        i.snapshotAt,
+      );
       item.run(
         connectionId,
         snapshotId,
@@ -447,9 +544,11 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   configure() {
     if (this.closed) return;
     const ids = new Set(
-      (this.db.prepare("SELECT connection_id FROM export_jobs").all() as { connection_id: string }[]).map(
-        (r) => r.connection_id,
-      ),
+      (
+        this.db.prepare("SELECT connection_id FROM export_jobs").all() as {
+          connection_id: string;
+        }[]
+      ).map((r) => r.connection_id),
     );
     for (const id of [...this.timers.keys()]) if (!ids.has(id)) this.cancel(id);
     for (const id of ids) this.reschedule(id);
@@ -462,9 +561,9 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   private reschedule(id: string) {
     this.cancel(id);
     if (this.closed || this.deps.paused() || this.running.has(id)) return;
-    const row = this.db.prepare("SELECT * FROM export_jobs WHERE connection_id=?").get(id) as
-      | JobRow
-      | undefined;
+    const row = this.db
+      .prepare("SELECT * FROM export_jobs WHERE connection_id=?")
+      .get(id) as JobRow | undefined;
     if (!row || row.enabled !== 1 || !this.deps.connectionExists(id)) return;
     const interval = row.interval_minutes * 60000;
     const now = this.clock.now();
@@ -473,13 +572,22 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
     const last = row.last_attempt_at ? Date.parse(row.last_attempt_at) : NaN;
     if (row.consecutive_failures > 0 && Number.isFinite(last)) {
       // Exponential retry: 1, 2, 4, 8 … minutes, never later than the normal interval.
-      due = last + Math.min(interval, RETRY_BASE_MS * 2 ** Math.min(row.consecutive_failures - 1, 20));
+      due =
+        last +
+        Math.min(
+          interval,
+          RETRY_BASE_MS * 2 ** Math.min(row.consecutive_failures - 1, 20),
+        );
       trigger = "retry";
     } else due = Number.isFinite(last) ? last + interval : now;
     let hash = 2166136261;
-    for (const char of id) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+    for (const char of id)
+      hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
     // Overdue jobs (e.g. after restart) run soon, spread over 5–35 s to avoid a startup burst.
-    const delay = Math.min(MAX_TIMER, Math.max(due - now, 5000 + ((hash >>> 0) % 30000)));
+    const delay = Math.min(
+      MAX_TIMER,
+      Math.max(due - now, 5000 + ((hash >>> 0) % 30000)),
+    );
     this.nextAt.set(id, now + delay);
     this.timers.set(
       id,
@@ -493,7 +601,10 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
   status() {
     return {
       paused: this.deps.paused(),
-      scheduled: [...this.nextAt].map(([id, at]) => ({ id, nextRunAt: new Date(at).toISOString() })),
+      scheduled: [...this.nextAt].map(([id, at]) => ({
+        id,
+        nextRunAt: new Date(at).toISOString(),
+      })),
       running: [...this.running.keys()],
     };
   }

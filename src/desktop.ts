@@ -25,6 +25,7 @@ import { SettingsStore, type AppSettings } from "./settings";
 import { normalizeInventory } from "./inventory/normalize";
 import { redact, classify } from "./redact";
 import type { NegativeStockRule } from "./sync/adapters/file";
+import { LocalInventory, LocalInventoryAdapter } from "./inventory/local-store";
 import type { GroupConfig } from "./sync/config";
 import type { InventoryAdapter, Platform, SyncGroup } from "./sync/types";
 export interface DesktopConnection {
@@ -73,6 +74,7 @@ export class DesktopService {
   readonly runtime: SyncCoordinator;
   readonly settings: SettingsStore;
   readonly exports: ExportService;
+  readonly local: LocalInventory;
   private busy = new Set<string>();
   private active = 0;
   private closing = false;
@@ -96,6 +98,7 @@ export class DesktopService {
       "CREATE TABLE IF NOT EXISTS connection_health(connection_id TEXT PRIMARY KEY, last_read_at TEXT, last_read_rows INTEGER, last_error TEXT, last_error_at TEXT)",
     );
     this.settings = new SettingsStore(this.store.db);
+    this.local = new LocalInventory(this.store.db);
     this.exports = new ExportService(
       this.store.db,
       {
@@ -193,7 +196,12 @@ export class DesktopService {
         )
         .run(
           id,
-          String(safe.message ?? (event === "export_held" ? "Snapshot held by validation" : "Read failed")).slice(0, 500),
+          String(
+            safe.message ??
+              (event === "export_held"
+                ? "Snapshot held by validation"
+                : "Read failed"),
+          ).slice(0, 500),
           now,
         );
   }
@@ -257,11 +265,11 @@ export class DesktopService {
       const h = health.get(c.id);
       const job = jobs.get(c.id);
       const last = this.exports.lastSuccessful(c.id) as
-        | { finished_at: string; product_count: number }
-        | undefined;
+        { finished_at: string; product_count: number } | undefined;
       // Active until the next successful export (scheduled jobs) or successful read test.
       const errorActive = Boolean(
-        h?.last_error && ((job?.consecutiveFailures ?? 0) > 0 || c.status === "error"),
+        h?.last_error &&
+        ((job?.consecutiveFailures ?? 0) > 0 || c.status === "error"),
       );
       return {
         id: c.id,
@@ -287,17 +295,41 @@ export class DesktopService {
     const exported = connections.filter((c) => c.lastExportAt);
     return {
       connections,
-      lastReadAt: connections.map((c) => c.lastReadAt).filter(Boolean).sort().pop() ?? null,
-      lastExportAt: exported.map((c) => c.lastExportAt).sort().pop() ?? null,
-      exportedProducts: exported.reduce((n, c) => n + (c.exportedCount ?? 0), 0),
-      intervals: [...new Set(connections.map((c) => c.intervalMinutes).filter(Boolean))],
-      errors: connections.filter((c) => c.lastError).map((c) => ({ id: c.id, name: c.name, message: c.lastError })),
+      lastReadAt:
+        connections
+          .map((c) => c.lastReadAt)
+          .filter(Boolean)
+          .sort()
+          .pop() ?? null,
+      lastExportAt:
+        exported
+          .map((c) => c.lastExportAt)
+          .sort()
+          .pop() ?? null,
+      exportedProducts: exported.reduce(
+        (n, c) => n + (c.exportedCount ?? 0),
+        0,
+      ),
+      intervals: [
+        ...new Set(connections.map((c) => c.intervalMinutes).filter(Boolean)),
+      ],
+      errors: connections
+        .filter((c) => c.lastError)
+        .map((c) => ({ id: c.id, name: c.name, message: c.lastError })),
       warnings: [
-        ...(this.settings.get().schedulerPaused ? [{ message: "Scheduled exports are stopped" }] : []),
+        ...(this.settings.get().schedulerPaused
+          ? [{ message: "Scheduled exports are stopped" }]
+          : []),
         ...this.exports
           .jobs()
-          .filter((j) => j.enabled && !this.connections().some((c) => c.id === j.connectionId))
-          .map((j) => ({ message: `Export schedule for missing connection ${j.connectionId}` })),
+          .filter(
+            (j) =>
+              j.enabled &&
+              !this.connections().some((c) => c.id === j.connectionId),
+          )
+          .map((j) => ({
+            message: `Export schedule for missing connection ${j.connectionId}`,
+          })),
       ],
     };
   }
@@ -331,6 +363,7 @@ export class DesktopService {
         "shoptet",
         "pos",
         "file",
+        "local",
         "cacaduu",
       ].includes(platform)
     )
@@ -338,7 +371,9 @@ export class DesktopService {
     if (value.permission !== "read" && value.permission !== "read_write")
       throw new UserError("Permission required");
     if (
-      ["odoo", "erpnext", "file", "pos", "cacaduu"].includes(platform) &&
+      ["odoo", "erpnext", "file", "local", "pos", "cacaduu"].includes(
+        platform,
+      ) &&
       value.permission !== "read"
     )
       throw new UserError("This connection is read-only or setup-required");
@@ -367,7 +402,9 @@ export class DesktopService {
     const negativeStock = value.negativeStock ?? previous?.negativeStock;
     if (negativeStock !== undefined && negativeStock !== "reject") {
       if (platform !== "file" || negativeStock !== "zero")
-        throw new UserError("Negative stock rule must be reject or zero for file sources");
+        throw new UserError(
+          "Negative stock rule must be reject or zero for file sources",
+        );
       c.negativeStock = "zero";
     }
     if (platform === "shoptet") {
@@ -417,7 +454,8 @@ export class DesktopService {
     const fileChanged =
       previous &&
       (previous.stockPath !== c.stockPath ||
-        (previous.negativeStock ?? "reject") !== (c.negativeStock ?? "reject") ||
+        (previous.negativeStock ?? "reject") !==
+          (c.negativeStock ?? "reject") ||
         JSON.stringify(previous.csvImport) !== JSON.stringify(c.csvImport));
     if (
       previous &&
@@ -457,7 +495,7 @@ export class DesktopService {
       )
         throw new UserError("Invalid integration type");
       if (
-        (platform === "file" && kind !== "file") ||
+        (["file", "local"].includes(platform) && kind !== "file") ||
         (["odoo", "erpnext", "woocommerce", "shopify", "cacaduu"].includes(
           platform,
         ) &&
@@ -575,6 +613,9 @@ export class DesktopService {
           c.csvImport,
           c.negativeStock ?? "reject",
         );
+        break;
+      case "local":
+        adapter = new LocalInventoryAdapter(c.id, this.local);
         break;
       case "odoo":
         adapter = new OdooAdapter(
@@ -968,7 +1009,36 @@ export class DesktopService {
       throw new UserError("Unknown connection");
     const result = await this.exports.runNow(id, "manual");
     if (result.state !== "ok") throw new UserError(result.message);
-    return { state: "ok", count: result.count, sha256: result.sha256, directory: result.directory };
+    return {
+      state: "ok",
+      count: result.count,
+      sha256: result.sha256,
+      directory: result.directory,
+    };
+  }
+  // ---------------------------------------------------------------- optional local inventory
+  localInventory() {
+    return this.local.snapshot();
+  }
+  localSaveProduct(input: unknown) {
+    const product = this.local.saveProduct(input);
+    this.log("inventory_product_saved", { sku: product.sku });
+    return product;
+  }
+  localAdjust(input: unknown) {
+    const result = this.local.adjust(input);
+    this.log("inventory_adjusted", result);
+    return result;
+  }
+  localImport(path: unknown) {
+    return this.track(async () => {
+      const result = await this.local.importCsv(text(path, "File path", 4096));
+      this.log("inventory_imported", result);
+      return result;
+    });
+  }
+  localLookup(code: unknown) {
+    return this.local.lookup(text(code, "Barcode or SKU", 100)) ?? null;
   }
   saveExportJob(input: unknown) {
     return this.mutate(() =>
@@ -980,18 +1050,25 @@ export class DesktopService {
     return this.track(async () => {
       if (!this.connections().some((c) => c.id === id))
         throw new UserError("Unknown connection");
-      return this.exports.runNow(id, "manual", { allowShrink: allowShrink === true });
+      return this.exports.runNow(id, "manual", {
+        allowShrink: allowShrink === true,
+      });
     });
   }
   setSchedulerPaused(paused: unknown) {
-    if (typeof paused !== "boolean") throw new UserError("Paused must be a boolean");
+    if (typeof paused !== "boolean")
+      throw new UserError("Paused must be a boolean");
     const settings = this.settings.update({ schedulerPaused: paused });
     this.log(paused ? "scheduler_stopped" : "scheduler_started", {});
     this.exports.configure();
     return { paused: settings.schedulerPaused };
   }
   updateSettings(input: unknown): AppSettings {
-    if (input && typeof input === "object" && "cloudSourceConnectionId" in input) {
+    if (
+      input &&
+      typeof input === "object" &&
+      "cloudSourceConnectionId" in input
+    ) {
       const id = (input as Record<string, unknown>).cloudSourceConnectionId;
       if (id !== null && !this.connections().some((c) => c.id === id))
         throw new UserError("Unknown cloud source connection");
@@ -1006,7 +1083,9 @@ export class DesktopService {
     return this.track(async () => {
       const job = this.exports.job(id);
       const rows = await (await this.adapter(id)).read();
-      const snapshot = normalizeInventory(id, rows, { warehouse: job?.warehouse ?? null });
+      const snapshot = normalizeInventory(id, rows, {
+        warehouse: job?.warehouse ?? null,
+      });
       return {
         complete: snapshot.complete,
         count: snapshot.items.length,
@@ -1035,24 +1114,43 @@ export class DesktopService {
         ...(c.csvImport ? { csvImport: c.csvImport } : {}),
         ...(c.negativeStock ? { negativeStock: c.negativeStock } : {}),
         ...(c.productMappings ? { productMappings: c.productMappings } : {}),
-        ...(c.warehouseMappings ? { warehouseMappings: c.warehouseMappings } : {}),
+        ...(c.warehouseMappings
+          ? { warehouseMappings: c.warehouseMappings }
+          : {}),
       })),
-      exportJobs: this.exports.jobs().map(({ connectionId, intervalMinutes, warehouse, shrinkGuard, directory }) => ({
-        connectionId,
-        intervalMinutes,
-        warehouse,
-        shrinkGuard,
-        directory,
-      })),
+      exportJobs: this.exports
+        .jobs()
+        .map(
+          ({
+            connectionId,
+            intervalMinutes,
+            warehouse,
+            shrinkGuard,
+            directory,
+          }) => ({
+            connectionId,
+            intervalMinutes,
+            warehouse,
+            shrinkGuard,
+            directory,
+          }),
+        ),
     };
   }
   /** Applies mapping fields to existing connections only. Never creates connections, credentials or schedules. */
   importMappingConfig(input: unknown) {
     return this.mutate(async () => {
-      if (!input || typeof input !== "object" || (input as Record<string, unknown>).format !== "test-repo-pos.mapping.v1")
+      if (
+        !input ||
+        typeof input !== "object" ||
+        (input as Record<string, unknown>).format !== "test-repo-pos.mapping.v1"
+      )
         throw new UserError("Unsupported mapping file");
       const v = input as { connections?: unknown; exportJobs?: unknown };
-      if (!Array.isArray(v.connections) || (v.exportJobs !== undefined && !Array.isArray(v.exportJobs)))
+      if (
+        !Array.isArray(v.connections) ||
+        (v.exportJobs !== undefined && !Array.isArray(v.exportJobs))
+      )
         throw new UserError("Unsupported mapping file");
       const existing = new Map(this.connections().map((c) => [c.id, c]));
       let connections = 0,
@@ -1061,7 +1159,12 @@ export class DesktopService {
         const current = existing.get(item?.id as string);
         if (!current || current.platform !== item.platform) continue;
         const patch: Record<string, unknown> = { ...current };
-        for (const key of ["csvImport", "negativeStock", "productMappings", "warehouseMappings"])
+        for (const key of [
+          "csvImport",
+          "negativeStock",
+          "productMappings",
+          "warehouseMappings",
+        ])
           if (key in item) patch[key] = item[key];
         await this.saveConnectionNow(patch);
         connections++;
@@ -1069,7 +1172,10 @@ export class DesktopService {
       for (const item of (v.exportJobs ?? []) as Record<string, unknown>[]) {
         if (!existing.has(item?.connectionId as string)) continue;
         // Imported schedules stay disabled until enabled on this computer.
-        await this.exports.saveJob({ ...item, enabled: false }, this.settings.get().defaultIntervalMinutes);
+        await this.exports.saveJob(
+          { ...item, enabled: false },
+          this.settings.get().defaultIntervalMinutes,
+        );
         jobs++;
       }
       this.log("mapping_imported", { connections, exportJobs: jobs });

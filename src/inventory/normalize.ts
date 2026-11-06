@@ -204,10 +204,7 @@ export function normalizeInventory(
         ...ref,
       });
     if (!valid) continue;
-    bySku.set(p.source_code, [
-      ...(bySku.get(p.source_code) ?? []),
-      s.location,
-    ]);
+    bySku.set(p.source_code, [...(bySku.get(p.source_code) ?? []), s.location]);
     if (ean) byEan.set(ean, (byEan.get(ean) ?? new Set()).add(p.source_code));
     items.push({
       sourceConnectionId: connectionId,

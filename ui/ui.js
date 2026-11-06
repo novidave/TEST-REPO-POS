@@ -126,25 +126,49 @@ async function refresh() {
     : "OS secure storage unavailable. Saving credentials and pairing are blocked.";
   $("pair").disabled = c.paired || !c.secureStorage;
   const cloudNotes = [];
-  if (c.pairAgain) cloudNotes.push("CACADUU revoked or replaced this device token. Pair this computer again.");
-  if (c.updateRequired) cloudNotes.push("CACADUU requires agent version " + c.updateRequired + " or newer. Cloud calls are stopped until you update.");
+  if (c.pairAgain)
+    cloudNotes.push(
+      "CACADUU revoked or replaced this device token. Pair this computer again.",
+    );
+  if (c.updateRequired)
+    cloudNotes.push(
+      "CACADUU requires agent version " +
+        c.updateRequired +
+        " or newer. Cloud calls are stopped until you update.",
+    );
   if (Math.abs(c.clockSkewSeconds ?? 0) > 120)
-    cloudNotes.push("This computer's clock differs from CACADUU by " + c.clockSkewSeconds + " s. Correct the Windows time.");
+    cloudNotes.push(
+      "This computer's clock differs from CACADUU by " +
+        c.clockSkewSeconds +
+        " s. Correct the Windows time.",
+    );
   if (c.paired)
     cloudNotes.push(
-      "Last heartbeat: " + (c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toLocaleString() : "not yet") +
-        (c.nextHeartbeatAt ? " · next " + new Date(c.nextHeartbeatAt).toLocaleTimeString() : "") +
+      "Last heartbeat: " +
+        (c.lastHeartbeatAt
+          ? new Date(c.lastHeartbeatAt).toLocaleString()
+          : "not yet") +
+        (c.nextHeartbeatAt
+          ? " · next " + new Date(c.nextHeartbeatAt).toLocaleTimeString()
+          : "") +
         (c.lastError ? " · last error " + c.lastError : ""),
     );
   if (c.paired && c.snapshots)
     cloudNotes.push(
-      "Snapshots: " + String(c.snapshots).replaceAll("_", " ") +
-        (c.lastSnapshot ? " (last: " + c.lastSnapshot.state.replaceAll("_", " ") + ")" : "") +
-        " · Commands: " + String(c.commands).replaceAll("_", " "),
+      "Snapshots: " +
+        String(c.snapshots).replaceAll("_", " ") +
+        (c.lastSnapshot
+          ? " (last: " + c.lastSnapshot.state.replaceAll("_", " ") + ")"
+          : "") +
+        " · Commands: " +
+        String(c.commands).replaceAll("_", " "),
     );
   $("cloud-health").textContent = cloudNotes.join("\n");
   $("cloud-health").hidden = !cloudNotes.length;
-  for (const note of cloudNotes.slice(0, c.pairAgain || c.updateRequired ? 1 : 0))
+  for (const note of cloudNotes.slice(
+    0,
+    c.pairAgain || c.updateRequired ? 1 : 0,
+  ))
     $("overview-alerts").append(element("div", "◌ " + note, "alert warn"));
   ["status", "heartbeat", "rotate", "unpair"].forEach(
     (id) => ($(id).disabled = !c.paired),
@@ -467,6 +491,7 @@ function platformFields() {
     woocommerce: ["baseUrl", "token", "secret"],
     shopify: ["shopDomain", "token"],
     pos: [],
+    local: [],
     shoptet: ["shoptetEshopId", "shoptetAccess", "shoptetWrite", "token"],
     cacaduu: [],
   }[platform];
@@ -474,9 +499,14 @@ function platformFields() {
     e.hidden = !visible.includes(e.dataset.field);
   });
   const permission = cf.elements.permission;
-  permission.disabled = ["odoo", "erpnext", "file", "pos", "cacaduu"].includes(
-    platform,
-  );
+  permission.disabled = [
+    "odoo",
+    "erpnext",
+    "file",
+    "local",
+    "pos",
+    "cacaduu",
+  ].includes(platform);
   if (permission.disabled) permission.value = "read";
   cf.elements.shoptetWriteAcknowledged.disabled =
     platform !== "shoptet" || permission.value !== "read_write";
@@ -494,6 +524,8 @@ function platformFields() {
     shoptet:
       "API access required: private API (Premium) or an approved add-on API token. Native reads and opt-in master-only available-stock updates; expected e-shop ID is verified first. Whole zero-claim stock only. Writes have no atomic revision check; coordinate other writers. No two-way sync; live staging pending.",
     pos: "Setup required: no vendor driver is bundled. Use a verified CSV/XML export from your POS.",
+    local:
+      "Built-in local inventory (Products & Mapping). Read-only source for exports and master groups; manage products and quantities there.",
     cacaduu:
       "Optional Phase A pairing is available in Settings. Cloud inventory is not an active group destination.",
   }[platform];
@@ -1539,7 +1571,8 @@ function applyLanguage() {
   ];
   for (const node of targets) {
     if (!node) continue;
-    if (!originalText.has(node)) originalText.set(node, node.textContent.trim());
+    if (!originalText.has(node))
+      originalText.set(node, node.textContent.trim());
     node.textContent = t(originalText.get(node));
   }
   $("page-title").textContent = t(names[currentPage]);
@@ -1579,7 +1612,9 @@ function renderOverview() {
     : "No source read yet";
   $("stat-last-export").textContent = when(o.lastExportAt);
   $("stat-interval").textContent = o.intervals.length
-    ? "Every " + o.intervals.join(" / ") + " min" +
+    ? "Every " +
+      o.intervals.join(" / ") +
+      " min" +
       (snapshot.settings?.schedulerPaused ? " · stopped" : "")
     : "No scheduled exports";
   $("stat-exported").textContent = o.exportedProducts;
@@ -1600,7 +1635,17 @@ function renderOverview() {
     [
       ["Connection", "name"],
       ["Type", "platform"],
-      ["Health", "healthLabel", (r) => "level-" + (r.health === "error" ? "error" : r.health === "healthy" ? "info" : "warning")],
+      [
+        "Health",
+        "healthLabel",
+        (r) =>
+          "level-" +
+          (r.health === "error"
+            ? "error"
+            : r.health === "healthy"
+              ? "info"
+              : "warning"),
+      ],
       ["Last read", "read"],
       ["Last export", "exported"],
       ["Products", "exportedCount"],
@@ -1617,17 +1662,25 @@ function renderOverview() {
       next: when(c.nextRunAt),
     })),
   );
-  table(
-    "recent-exports",
-    exportRunColumns,
-    exportRunRows().slice(0, 5),
-  );
+  table("recent-exports", exportRunColumns, exportRunRows().slice(0, 5));
 }
 const exportRunColumns = [
   ["Started", "started"],
   ["Connection", "connection"],
   ["Trigger", "trigger"],
-  ["Result", "state", (r) => "level-" + (r.state === "ok" ? "info" : r.state === "held" ? "warning" : r.state === "running" ? "info" : "error")],
+  [
+    "Result",
+    "state",
+    (r) =>
+      "level-" +
+      (r.state === "ok"
+        ? "info"
+        : r.state === "held"
+          ? "warning"
+          : r.state === "running"
+            ? "info"
+            : "error"),
+  ],
   ["Products", "product_count"],
   ["SHA-256", "hash"],
   ["Detail", "message"],
@@ -1672,7 +1725,9 @@ function intervalControls(name, minutes) {
 function readInterval(root, name) {
   const preset = root.querySelector(`[name="${name}Preset"]`).value;
   const value = Number(
-    preset === "custom" ? root.querySelector(`[name="${name}Custom"]`).value : preset,
+    preset === "custom"
+      ? root.querySelector(`[name="${name}Custom"]`).value
+      : preset,
   );
   if (!Number.isInteger(value) || value < 5 || value > 1440)
     throw new Error("Choose an interval of 5–1440 whole minutes.");
@@ -1681,17 +1736,27 @@ function readInterval(root, name) {
 function renderExports() {
   const root = $("export-jobs");
   if (!snapshot.exportJobs) {
-    root.replaceChildren(element("div", "Folder exports are available in the desktop app.", "empty"));
+    root.replaceChildren(
+      element(
+        "div",
+        "Folder exports are available in the desktop app.",
+        "empty",
+      ),
+    );
     return;
   }
   const paused = snapshot.settings?.schedulerPaused;
-  $("scheduler-toggle").textContent = t(paused ? "Start schedules" : "Stop schedules");
+  $("scheduler-toggle").textContent = t(
+    paused ? "Start schedules" : "Stop schedules",
+  );
   const status = snapshot.exportStatus ?? { running: [], scheduled: [] };
   $("export-scheduler-status").textContent =
     (paused
       ? "Scheduled exports are stopped. Manual Sync Now still works."
       : `${status.scheduled.length} export schedule(s) active · ${status.running.length} running.`) +
-    " Default output: " + snapshot.exportDirectory + " / <connection ID> / stock.csv + manifest.json";
+    " Default output: " +
+    snapshot.exportDirectory +
+    " / <connection ID> / stock.csv + manifest.json";
   // Keep unsaved edits on cards the user is changing.
   const kept = new Map();
   for (const id of dirtyExportCards) {
@@ -1701,7 +1766,13 @@ function renderExports() {
   root.replaceChildren();
   const candidates = snapshot.connections.filter(exportable);
   if (!candidates.length) {
-    root.append(element("div", "Add and test a source connection to configure automatic exports.", "empty"));
+    root.append(
+      element(
+        "div",
+        "Add and test a source connection to configure automatic exports.",
+        "empty",
+      ),
+    );
     return;
   }
   for (const c of candidates) {
@@ -1710,16 +1781,31 @@ function renderExports() {
       continue;
     }
     const job = snapshot.exportJobs.find((j) => j.connectionId === c.id);
-    const last = (snapshot.exportRuns ?? []).find((r) => r.connection_id === c.id);
-    const lastOk = (snapshot.exportRuns ?? []).find((r) => r.connection_id === c.id && r.state === "ok");
+    const last = (snapshot.exportRuns ?? []).find(
+      (r) => r.connection_id === c.id,
+    );
+    const lastOk = (snapshot.exportRuns ?? []).find(
+      (r) => r.connection_id === c.id && r.state === "ok",
+    );
     const card = element("article", undefined, "card export-card");
     card.dataset.exportCard = c.id;
     const badge = element(
       "span",
-      job?.running ? "RUNNING" : job?.enabled ? (job.consecutiveFailures ? "RETRYING" : "SCHEDULED") : "MANUAL",
-      "badge " + (job?.consecutiveFailures ? "error" : job?.enabled ? "ok" : ""),
+      job?.running
+        ? "RUNNING"
+        : job?.enabled
+          ? job.consecutiveFailures
+            ? "RETRYING"
+            : "SCHEDULED"
+          : "MANUAL",
+      "badge " +
+        (job?.consecutiveFailures ? "error" : job?.enabled ? "ok" : ""),
     );
-    card.append(badge, element("h3", c.name), element("p", c.platform + " · " + (c.vendor || c.id), "muted"));
+    card.append(
+      badge,
+      element("h3", c.name),
+      element("p", c.platform + " · " + (c.vendor || c.id), "muted"),
+    );
     const details = element("dl");
     for (const [term, value] of [
       ["Last run", last ? when(last.started_at) + " · " + last.state : "Never"],
@@ -1727,14 +1813,22 @@ function renderExports() {
       ["Products", lastOk?.product_count ?? "—"],
       ["Checksum", shortHash(lastOk?.sha256)],
       ["Next run", job?.enabled && !paused ? when(job.nextRunAt) : "—"],
-      ["Folder", job?.effectiveDirectory ?? snapshot.exportDirectory + "/" + c.id],
+      [
+        "Folder",
+        job?.effectiveDirectory ?? snapshot.exportDirectory + "/" + c.id,
+      ],
     ])
       details.append(element("dt", term), element("dd", String(value)));
     if (last && last.state !== "ok" && last.message)
       details.append(element("dt", "Detail"), element("dd", last.message));
     card.append(details);
     const form = element("div");
-    form.append(intervalControls("interval", job?.intervalMinutes ?? snapshot.settings?.defaultIntervalMinutes ?? 15));
+    form.append(
+      intervalControls(
+        "interval",
+        job?.intervalMinutes ?? snapshot.settings?.defaultIntervalMinutes ?? 15,
+      ),
+    );
     const grid = element("div", undefined, "form-grid");
     const folderLabel = element("label", "Export folder (optional)"),
       folder = document.createElement("input");
@@ -1755,30 +1849,44 @@ function renderExports() {
     enabled.type = "checkbox";
     enabled.name = "enabled";
     enabled.checked = Boolean(job?.enabled);
-    enabledLabel.append(enabled, document.createTextNode("Export automatically on this schedule"));
+    enabledLabel.append(
+      enabled,
+      document.createTextNode("Export automatically on this schedule"),
+    );
     const guardLabel = element("label", undefined, "check"),
       guard = document.createElement("input");
     guard.type = "checkbox";
     guard.name = "shrinkGuard";
     guard.checked = job ? job.shrinkGuard : true;
-    guardLabel.append(guard, document.createTextNode("Hold exports with fewer than half the previous products"));
+    guardLabel.append(
+      guard,
+      document.createTextNode(
+        "Hold exports with fewer than half the previous products",
+      ),
+    );
     form.append(enabledLabel, guardLabel);
     form.oninput = form.onchange = () => dirtyExportCards.add(c.id);
     card.append(form);
     const actions = element("div", undefined, "actions");
     actions.append(
-      button(t("Save schedule"), async () => {
-        await window.desktop.saveExportJob({
-          connectionId: c.id,
-          enabled: enabled.checked,
-          intervalMinutes: readInterval(form, "interval"),
-          directory: folder.value.trim() || null,
-          warehouse: warehouse.value.trim() || null,
-          shrinkGuard: guard.checked,
-        });
-        dirtyExportCards.delete(c.id);
-        return enabled.checked ? "Export schedule saved and started." : "Export settings saved. Automatic export is off.";
-      }, false),
+      button(
+        t("Save schedule"),
+        async () => {
+          await window.desktop.saveExportJob({
+            connectionId: c.id,
+            enabled: enabled.checked,
+            intervalMinutes: readInterval(form, "interval"),
+            directory: folder.value.trim() || null,
+            warehouse: warehouse.value.trim() || null,
+            shrinkGuard: guard.checked,
+          });
+          dirtyExportCards.delete(c.id);
+          return enabled.checked
+            ? "Export schedule saved and started."
+            : "Export settings saved. Automatic export is off.";
+        },
+        false,
+      ),
       button("Choose folder", async () => {
         const path = await window.desktop.chooseFolder();
         if (path) {
@@ -1786,13 +1894,19 @@ function renderExports() {
           dirtyExportCards.add(c.id);
         }
       }),
-      button(t("Sync Now"), async () => exportMessage(await window.desktop.exportNow(c.id))),
+      button(t("Sync Now"), async () =>
+        exportMessage(await window.desktop.exportNow(c.id)),
+      ),
       button(t("Open folder"), () => window.desktop.openExportFolder(c.id)),
     );
     if (last?.state === "held" && /products vs/.test(last.message || ""))
       actions.append(
         button("Publish held snapshot", async () => {
-          if (!window.confirm("Publish the smaller snapshot? Review the source first: products missing from a complete export are treated as sold out downstream."))
+          if (
+            !window.confirm(
+              "Publish the smaller snapshot? Review the source first: products missing from a complete export are treated as sold out downstream.",
+            )
+          )
             return;
           return exportMessage(await window.desktop.exportNow(c.id, true));
         }),
@@ -1815,7 +1929,10 @@ function exportMessage(result) {
   const issues = (result.issues ?? [])
     .filter((i) => i.severity === "error")
     .slice(0, 5)
-    .map((i) => "• " + (i.sourceProductId ? i.sourceProductId + ": " : "") + i.message)
+    .map(
+      (i) =>
+        "• " + (i.sourceProductId ? i.sourceProductId + ": " : "") + i.message,
+    )
     .join("\n");
   throw new Error(result.message + (issues ? "\n" + issues : ""));
 }
@@ -1839,7 +1956,8 @@ function renderLogs() {
         (r) =>
           (category === "all" || r.category === category) &&
           (level === "all" || r.level === level) &&
-          (!search || (r.event + " " + r.detail_json).toLowerCase().includes(search)),
+          (!search ||
+            (r.event + " " + r.detail_json).toLowerCase().includes(search)),
       )
       .map((r) => ({ ...r, time: new Date(r.created_at).toLocaleString() })),
   );
@@ -1865,25 +1983,31 @@ function renderSettings() {
         ? "Tray icon active: closing the window keeps the agent running."
         : "No system tray available: closing the window quits the agent.");
   if (settingsDirty) return;
-  const preset = [5, 15, 30, 60].includes(s.defaultIntervalMinutes) ? String(s.defaultIntervalMinutes) : "custom";
+  const preset = [5, 15, 30, 60].includes(s.defaultIntervalMinutes)
+    ? String(s.defaultIntervalMinutes)
+    : "custom";
   sf.elements.defaultIntervalPreset.value = preset;
   sf.elements.defaultIntervalCustom.value = s.defaultIntervalMinutes;
   sf.querySelector("[data-custom-interval]").hidden = preset !== "custom";
   sf.elements.language.value = s.language;
   sf.elements.exportRoot.value = s.exportRoot ?? "";
-  for (const key of ["openAtLogin", "startInBackground", "closeToTray"]) sf.elements[key].checked = s[key];
+  for (const key of ["openAtLogin", "startInBackground", "closeToTray"])
+    sf.elements[key].checked = s[key];
   $("cloud-snapshots").checked = s.cloudSnapshotsEnabled;
   $("cloud-commands").checked = s.cloudCommandsEnabled;
 }
 sf.oninput = sf.onchange = () => {
   settingsDirty = true;
-  sf.querySelector("[data-custom-interval]").hidden = sf.elements.defaultIntervalPreset.value !== "custom";
+  sf.querySelector("[data-custom-interval]").hidden =
+    sf.elements.defaultIntervalPreset.value !== "custom";
 };
 sf.onsubmit = (event) => {
   event.preventDefault();
   run(async () => {
     const preset = sf.elements.defaultIntervalPreset.value;
-    const defaultIntervalMinutes = Number(preset === "custom" ? sf.elements.defaultIntervalCustom.value : preset);
+    const defaultIntervalMinutes = Number(
+      preset === "custom" ? sf.elements.defaultIntervalCustom.value : preset,
+    );
     await window.desktop.updateSettings({
       defaultIntervalMinutes,
       language: sf.elements.language.value,
@@ -1921,16 +2045,26 @@ $("scheduler-toggle").onclick = () =>
   run(async () => {
     const paused = !snapshot.settings?.schedulerPaused;
     await window.desktop.setSchedulerPaused(paused);
-    return paused ? "Scheduled exports stopped. Manual Sync Now still works." : "Scheduled exports started.";
+    return paused
+      ? "Scheduled exports stopped. Manual Sync Now still works."
+      : "Scheduled exports started.";
   }, $("scheduler-toggle"));
 $("export-all").onclick = () =>
   run(async () => {
-    const ids = (snapshot.exportJobs ?? []).filter((j) => j.enabled).map((j) => j.connectionId);
+    const ids = (snapshot.exportJobs ?? [])
+      .filter((j) => j.enabled)
+      .map((j) => j.connectionId);
     if (!ids.length) return "Enable at least one export schedule first.";
     const results = await Promise.all(
-      ids.map((id) => window.desktop.exportNow(id).catch((e) => ({ state: "failed", message: e.message }))),
+      ids.map((id) =>
+        window.desktop
+          .exportNow(id)
+          .catch((e) => ({ state: "failed", message: e.message })),
+      ),
     );
-    return results.map((r, i) => connectionName(ids[i]) + ": " + r.message).join("\n");
+    return results
+      .map((r, i) => connectionName(ids[i]) + ": " + r.message)
+      .join("\n");
   }, $("export-all"));
 $("preview-normalized").onclick = () =>
   run(async () => {
@@ -1939,7 +2073,15 @@ $("preview-normalized").onclick = () =>
     const preview = await window.desktop.previewNormalized(id);
     const list = element("ul", undefined, "issue-list");
     preview.issues.forEach((i) =>
-      list.append(element("li", (i.severity === "error" ? "Error · " : "Warning · ") + (i.sourceProductId ? i.sourceProductId + ": " : "") + i.message, i.severity)),
+      list.append(
+        element(
+          "li",
+          (i.severity === "error" ? "Error · " : "Warning · ") +
+            (i.sourceProductId ? i.sourceProductId + ": " : "") +
+            i.message,
+          i.severity,
+        ),
+      ),
     );
     $("normalized-issues").replaceChildren(list);
     table(
@@ -1960,18 +2102,28 @@ $("preview-normalized").onclick = () =>
     );
     return (
       (preview.complete ? "Complete: " : "Would be held: ") +
-      preview.count + " normalized products from " + preview.warehouses.length +
-      " warehouse(s). " + preview.issues.length + " issue(s). Nothing was written."
+      preview.count +
+      " normalized products from " +
+      preview.warehouses.length +
+      " warehouse(s). " +
+      preview.issues.length +
+      " issue(s). Nothing was written."
     );
   }, $("preview-normalized"));
 async function loadProducts() {
   const id = $("product-connection").value;
   if (!id || !window.desktop.products) return;
   const result = await window.desktop.products(id);
-  const stock = new Map(result.lastSnapshot.map((r) => [r.source_product_id, r]));
+  const stock = new Map(
+    result.lastSnapshot.map((r) => [r.source_product_id, r]),
+  );
   productCache = {
     id,
-    rows: result.identities.map((p) => ({ ...p, ...stock.get(p.source_product_id), seen: when(p.last_seen_at) })),
+    rows: result.identities.map((p) => ({
+      ...p,
+      ...stock.get(p.source_product_id),
+      seen: when(p.last_seen_at),
+    })),
   };
   renderProducts();
 }
@@ -1990,16 +2142,27 @@ function renderProducts() {
       ["Last seen", "seen"],
     ],
     productCache.rows.filter(
-      (r) => !search || [r.sku, r.ean, r.name].filter(Boolean).join(" ").toLowerCase().includes(search),
+      (r) =>
+        !search ||
+        [r.sku, r.ean, r.name]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(search),
     ),
   );
 }
-$("product-connection").onchange = () => loadProducts().catch((e) => notice(e.message, true));
+$("product-connection").onchange = () =>
+  loadProducts().catch((e) => notice(e.message, true));
 $("product-search").oninput = renderProducts;
 $("mapping-export").onclick = () =>
   run(async () => {
     const result = await window.desktop.exportMapping();
-    return result ? "Mapping configuration saved to " + result.path + ". No credentials included." : undefined;
+    return result
+      ? "Mapping configuration saved to " +
+          result.path +
+          ". No credentials included."
+      : undefined;
   }, $("mapping-export"));
 $("mapping-import").onclick = () =>
   run(async () => {
@@ -2008,3 +2171,131 @@ $("mapping-import").onclick = () =>
       ? `Imported mappings for ${result.connections} connection(s) and ${result.exportJobs} export setting(s). Enable imported schedules on the Inventory Sync page.`
       : undefined;
   }, $("mapping-import"));
+
+// ---------------------------------------------------------------- optional local inventory
+async function loadLocalInventory() {
+  if (!window.desktop.localInventory) {
+    $("local-inventory").hidden = true;
+    return;
+  }
+  const inv = await window.desktop.localInventory();
+  $("local-summary").textContent =
+    `${inv.products} product(s) · ${inv.locations.length} location(s) · ${inv.stock.length} stock line(s)`;
+  $("local-locations").replaceChildren(
+    ...inv.locations.map((name) => {
+      const o = document.createElement("option");
+      o.value = name;
+      return o;
+    }),
+  );
+  table(
+    "local-stock",
+    [
+      ["SKU", "sku"],
+      ["EAN", "ean"],
+      ["Name", "name"],
+      ["Location", "location"],
+      ["Quantity", "quantity"],
+      ["Price", "price"],
+      ["Currency", "currency"],
+      ["Updated", "updated"],
+    ],
+    inv.stock.map((r) => ({ ...r, updated: when(r.updated_at) })),
+  );
+  table(
+    "local-movements",
+    [
+      ["Time", "time"],
+      ["SKU", "sku"],
+      ["Location", "location"],
+      ["Change", "change"],
+      ["After", "quantity_after"],
+      ["Reason", "reason"],
+    ],
+    inv.movements.map((m) => ({
+      ...m,
+      time: when(m.created_at),
+      change: (m.delta > 0 ? "+" : "") + m.delta,
+    })),
+  );
+}
+$("local-inventory").addEventListener("toggle", () => {
+  if ($("local-inventory").open)
+    loadLocalInventory().catch((e) => notice(e.message, true));
+});
+$("local-product-form").onsubmit = (event) => {
+  event.preventDefault();
+  const f = event.target;
+  run(async () => {
+    const p = await window.desktop.localSaveProduct({
+      sku: f.elements.sku.value,
+      name: f.elements.name.value,
+      ean: f.elements.ean.value,
+      price: f.elements.price.value,
+      currency: f.elements.currency.value.trim().toUpperCase(),
+    });
+    f.reset();
+    await loadLocalInventory();
+    return "Product " + p.sku + " saved.";
+  }, f.querySelector("[type=submit]"));
+};
+$("local-adjust-form").onsubmit = (event) => {
+  event.preventDefault();
+  const f = event.target;
+  run(async () => {
+    const r = await window.desktop.localAdjust({
+      sku: f.elements.sku.value,
+      location: f.elements.location.value,
+      delta: f.elements.delta.value,
+      set: f.elements.set.value,
+      reason: f.elements.reason.value || "adjustment",
+    });
+    f.elements.sku.value = "";
+    f.elements.delta.value = "";
+    f.elements.set.value = "";
+    $("local-lookup-result").hidden = true;
+    await loadLocalInventory();
+    return `${r.sku} @ ${r.location}: ${r.before} → ${r.after}`;
+  }, f.querySelector("[type=submit]"));
+};
+// Barcode scanners type the code and press Enter; show what was found before adjusting.
+$("local-adjust-form").elements.sku.addEventListener(
+  "change",
+  async (event) => {
+    const value = event.target.value.trim();
+    if (!value) return;
+    try {
+      const p = await window.desktop.localLookup(value);
+      $("local-lookup-result").hidden = false;
+      $("local-lookup-result").textContent = p
+        ? `${p.sku} · ${p.name} · ${p.price} ${p.currency}${p.ean ? " · EAN " + p.ean : ""}`
+        : "No product with this barcode or SKU.";
+    } catch (e) {
+      notice(e.message, true);
+    }
+  },
+);
+$("local-import").onclick = () =>
+  run(async () => {
+    const path = await window.desktop.chooseFile();
+    if (!path) return;
+    const r = await window.desktop.localImport(path);
+    await loadLocalInventory();
+    return `Imported ${r.rows} stock line(s) for ${r.products} product(s).`;
+  }, $("local-import"));
+$("local-use-source").onclick = () =>
+  run(async () => {
+    const existing = snapshot.connections.find((c) => c.platform === "local");
+    if (existing) {
+      navigate("sync");
+      return "Local inventory is already a connection. Configure its export on this page.";
+    }
+    await window.desktop.saveConnection({
+      name: "Local inventory",
+      platform: "local",
+      permission: "read",
+      integrationKind: "file",
+    });
+    navigate("sync");
+    return "Local inventory added as a source. Enable its automatic export on this page.";
+  }, $("local-use-source"));

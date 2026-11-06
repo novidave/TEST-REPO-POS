@@ -7,8 +7,14 @@ const SECRET_VALUE: [RegExp, string][] = [
   [/\b(shpat|shpca|shppa|shpss)_[A-Za-z0-9]{8,}/g, "$1_[redacted]"],
   [/\b(ck|cs)_[a-f0-9]{20,}\b/gi, "$1_[redacted]"],
   [/(https?:\/\/)[^\s/:@]+:[^\s/@]+@/gi, "$1[redacted]@"],
-  [/([?&](?:token|key|secret|password|signature|sig|access_token|consumer_key|consumer_secret)=)[^&\s]+/gi, "$1[redacted]"],
-  [/(password|pwd|secret|token|api[-_]?key)\s*[=:]\s*[^\s;,&]+/gi, "$1=[redacted]"],
+  [
+    /([?&](?:token|key|secret|password|signature|sig|access_token|consumer_key|consumer_secret)=)[^&\s]+/gi,
+    "$1[redacted]",
+  ],
+  [
+    /(password|pwd|secret|token|api[-_]?key)\s*[=:]\s*[^\s;,&]+/gi,
+    "$1=[redacted]",
+  ],
 ];
 export function redactText(value: string): string {
   let result = value;
@@ -42,13 +48,17 @@ export type LogCategory =
   | "settings"
   | "inventory";
 /** Stable classification of existing and new audit events for filtering in Logs. */
-export function classify(event: string): { level: LogLevel; category: LogCategory } {
-  const level: LogLevel =
-    /failed|error|rejected/.test(event)
-      ? "error"
-      : /held|deferred|skipped|conflict|paused|warning|not_available|retry/.test(event)
-        ? "warning"
-        : "info";
+export function classify(event: string): {
+  level: LogLevel;
+  category: LogCategory;
+} {
+  const level: LogLevel = /failed|error|rejected/.test(event)
+    ? "error"
+    : /held|deferred|skipped|conflict|paused|warning|not_available|retry/.test(
+          event,
+        )
+      ? "warning"
+      : "info";
   const category: LogCategory = /^cloud_/.test(event)
     ? "cloud"
     : /retry|deferred/.test(event)

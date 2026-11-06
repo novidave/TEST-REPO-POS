@@ -35,11 +35,16 @@ for (let y = 0; y < size; y++) {
     const inside = Math.hypot(qx, qy) <= 6.5;
     if (!inside) continue;
     const t = (x + y) / (2 * size);
-    let [r, g, b] = [0x42 + (0x15 - 0x42) * t, 0xc6 + (0x98 - 0xc6) * t, 0x7a + (0x4a - 0x7a) * t];
+    let [r, g, b] = [
+      0x42 + (0x15 - 0x42) * t,
+      0xc6 + (0x98 - 0xc6) * t,
+      0x7a + (0x4a - 0x7a) * t,
+    ];
     // White "C" ring with an opening on the right
     const d = Math.hypot(cx, cy),
       angle = Math.atan2(cy, cx);
-    if (d >= 6.5 && d <= 10 && Math.abs(angle) > 0.75) [r, g, b] = [255, 255, 255];
+    if (d >= 6.5 && d <= 10 && Math.abs(angle) > 0.75)
+      [r, g, b] = [255, 255, 255];
     raw.set([Math.round(r), Math.round(g), Math.round(b), 255], o);
   }
 }

@@ -1,5 +1,12 @@
 import { UserError } from "./security";
-import { open, mkdir, rename, readFile, readdir, unlink } from "node:fs/promises";
+import {
+  open,
+  mkdir,
+  rename,
+  readFile,
+  readdir,
+  unlink,
+} from "node:fs/promises";
 import type { Stock } from "./sync/types";
 import { join, resolve } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -196,14 +203,18 @@ async function writeExport(
   };
 }
 /** Reader side of the protocol, for downstream watchers and tests. */
-export async function readPublishedExport(directory: string): Promise<
+export async function readPublishedExport(
+  directory: string,
+): Promise<
   | { state: "ok"; manifest: Record<string, unknown>; csv: string }
   | { state: "missing" | "incomplete" }
 > {
   let manifest: Record<string, unknown>;
   let csv: Buffer;
   try {
-    manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"));
+    manifest = JSON.parse(
+      await readFile(join(directory, "manifest.json"), "utf8"),
+    );
     csv = await readFile(join(directory, String(manifest.file ?? "stock.csv")));
   } catch {
     return { state: "missing" };

@@ -48,6 +48,16 @@ export const connectorCapabilities = [
     detail: "Verified schema; local stock.csv + manifest export",
   },
   {
+    platform: "local",
+    name: "Local inventory (optional)",
+    state: "implemented",
+    read: true,
+    write: false,
+    twoWay: false,
+    detail:
+      "Built-in products, locations, adjustments, CSV import and barcode lookup for merchants without a stock system; read-only source for exports and master groups",
+  },
+  {
     platform: "shoptet",
     name: "Shoptet",
     state: "implemented",

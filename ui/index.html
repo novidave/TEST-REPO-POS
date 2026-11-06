@@ -80,8 +80,7 @@
             ><span id="stat-interval">No scheduled exports</span>
           </article>
           <article>
-            <small>Exported products</small
-            ><strong id="stat-exported">0</strong
+            <small>Exported products</small><strong id="stat-exported">0</strong
             ><span>In the latest published stock.csv files</span>
           </article>
         </div>
@@ -296,6 +295,7 @@
             ><label
               >Platform<select name="platform">
                 <option value="file">CSV / XML / JSON file</option>
+                <option value="local">Local inventory (built-in)</option>
                 <option value="odoo">Odoo 18 — read only</option>
                 <option value="erpnext">
                   ERPNext / Frappe v15 — read only
@@ -507,8 +507,7 @@
             invalid prices or currencies and multi-warehouse codes are listed
             below. Nothing is written.
           </p>
-          <label
-            >Connection<select id="normalized-connection"></select></label
+          <label>Connection<select id="normalized-connection"></select></label
           ><button id="preview-normalized">Preview normalized stock</button>
           <div id="normalized-issues"></div>
           <div id="normalized-table"></div>
@@ -528,6 +527,78 @@
           />
           <div id="product-table"></div>
         </div>
+        <details id="local-inventory" class="panel">
+          <summary><strong>Local inventory (optional)</strong></summary>
+          <p class="muted">
+            For shops without a stock system: products, stock locations,
+            adjustments, CSV import and barcode lookup. Not an accounting or
+            fiscal system. Use it as a source like any POS connection.
+          </p>
+          <p id="local-summary" class="hint"></p>
+          <button id="local-use-source" class="secondary">
+            Use local inventory as an export source
+          </button>
+          <h3 class="subhead">Product</h3>
+          <form id="local-product-form" class="form-grid">
+            <label>SKU<input name="sku" required maxlength="100" /></label
+            ><label>Name<input name="name" required maxlength="300" /></label
+            ><label>EAN / barcode<input name="ean" maxlength="32" /></label
+            ><label
+              >Selling price<input
+                name="price"
+                required
+                inputmode="decimal" /></label
+            ><label
+              >Currency<input
+                name="currency"
+                required
+                maxlength="3"
+                placeholder="EUR" /></label
+            ><button type="submit">Save product</button>
+          </form>
+          <h3 class="subhead">Stock adjustment</h3>
+          <form id="local-adjust-form" class="form-grid">
+            <label
+              >SKU or scanned barcode<input
+                name="sku"
+                required
+                autocomplete="off" /></label
+            ><label
+              >Location<input
+                name="location"
+                required
+                list="local-locations" /></label
+            ><label
+              >Change (+/−)<input name="delta" type="number" step="1" /></label
+            ><label
+              >or counted quantity<input
+                name="set"
+                type="number"
+                min="0"
+                step="1" /></label
+            ><label
+              >Reason<input
+                name="reason"
+                placeholder="Delivery, count, damage…" /></label
+            ><button type="submit">Apply adjustment</button>
+          </form>
+          <datalist id="local-locations"></datalist>
+          <p id="local-lookup-result" class="hint" hidden></p>
+          <div class="actions">
+            <button id="local-import" class="secondary">
+              Import stock CSV…
+            </button>
+          </div>
+          <p class="hint">
+            CSV columns: sku, name, ean (optional), price, currency, location,
+            quantity (counted stock). The file is validated completely before
+            anything changes.
+          </p>
+          <h3 class="subhead">Current stock</h3>
+          <div id="local-stock"></div>
+          <h3 class="subhead">Inventory history</h3>
+          <div id="local-movements"></div>
+        </details>
         <div class="panel">
           <h2>Mapping configuration</h2>
           <p class="muted">
@@ -568,7 +639,11 @@
               <option value="warning">Warnings</option>
               <option value="info">Info</option></select
             ><label class="sr-only" for="log-search">Search log</label
-            ><input id="log-search" type="search" placeholder="⌕  Search log…" />
+            ><input
+              id="log-search"
+              type="search"
+              placeholder="⌕  Search log…"
+            />
           </div>
           <p class="hint">
             Timestamped, structured entries. Tokens, passwords, keys and
@@ -620,11 +695,8 @@
           <label
             >Export folder<input
               name="exportRoot"
-              placeholder="Default: application data folder / exports" /><button
-              type="button"
-              id="choose-export-root"
-              class="secondary"
-            >
+              placeholder="Default: application data folder / exports"
+            /><button type="button" id="choose-export-root" class="secondary">
               Choose folder</button
             ><button type="button" id="reset-export-root" class="secondary">
               Use default
@@ -653,8 +725,8 @@
           <p id="app-version"></p>
           <p class="hint">
             Updates are installed manually: install the newer package over this
-            one. Settings, connections, encrypted credentials and export
-            history stay in the Windows user profile. No automatic download is
+            one. Settings, connections, encrypted credentials and export history
+            stay in the Windows user profile. No automatic download is
             performed.
           </p>
         </div>
@@ -726,8 +798,8 @@
           <h3 class="subhead">Optional inventory features</h3>
           <div class="form-grid">
             <label
-              >Cloud inventory source<select id="cloud-source"></select></label
-            >
+              >Cloud inventory source<select id="cloud-source"></select
+            ></label>
           </div>
           <label class="check"
             ><input id="cloud-snapshots" type="checkbox" />Phase B: offer each

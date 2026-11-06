@@ -197,7 +197,8 @@ export const regionalConnectors: readonly RegionalConnector[] = [
     nativeState: "setup_required",
     access:
       "DBF data files are not parsed. Export stock to CSV from MRP and map the columns explicitly.",
-    stockCaveat: "Confirm the warehouse scope and that quantities are actual remaining stock.",
+    stockCaveat:
+      "Confirm the warehouse scope and that quantities are actual remaining stock.",
   },
   {
     id: "ikelp",
@@ -208,7 +209,8 @@ export const regionalConnectors: readonly RegionalConnector[] = [
     nativeState: "setup_required",
     access:
       "No verified iKelp API contract is pinned. A complete stock export saved as CSV can be mapped explicitly; Excel files must be saved as CSV first.",
-    stockCaveat: "Confirm the export lists every product of the warehouse, not only changed items.",
+    stockCaveat:
+      "Confirm the export lists every product of the warehouse, not only changed items.",
   },
   {
     id: "elcom",
@@ -219,7 +221,8 @@ export const regionalConnectors: readonly RegionalConnector[] = [
     nativeState: "setup_required",
     access:
       "No device protocol is implemented. Use the inventory software connected to the register and its stock export instead of the register itself.",
-    stockCaveat: "Cash registers usually hold sales data, not complete warehouse stock.",
+    stockCaveat:
+      "Cash registers usually hold sales data, not complete warehouse stock.",
   },
 ];
 export function regionalConnector(id: string) {

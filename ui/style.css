@@ -970,3 +970,10 @@ td.level-warning {
 #cloud-health {
   white-space: pre-wrap;
 }
+#local-product-form button,
+#local-adjust-form button {
+  align-self: end;
+}
+#local-inventory summary {
+  cursor: pointer;
+}

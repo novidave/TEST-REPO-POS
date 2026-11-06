@@ -1,13 +1,22 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { mkdtemp, rm, writeFile, readFile, readdir } = require("node:fs/promises");
+const {
+  mkdtemp,
+  rm,
+  writeFile,
+  readFile,
+  readdir,
+} = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { createHash } = require("node:crypto");
 const { DesktopService } = require("../dist/src/desktop.js");
 const { CredentialVault } = require("../dist/src/security.js");
 const { readPublishedExport, exportStock } = require("../dist/src/export.js");
-const { normalizeInventory, gtinChecksumValid } = require("../dist/src/inventory/normalize.js");
+const {
+  normalizeInventory,
+  gtinChecksumValid,
+} = require("../dist/src/inventory/normalize.js");
 const { redact } = require("../dist/src/redact.js");
 
 const cipher = {
@@ -36,7 +45,8 @@ function fakeClock(start = Date.parse("2026-11-06T08:00:00Z")) {
     },
     clearTimeout: (id) => timers.delete(id),
     timers,
-    pending: () => [...timers.values()].map((t) => t.at - now).sort((a, b) => a - b),
+    pending: () =>
+      [...timers.values()].map((t) => t.at - now).sort((a, b) => a - b),
     async advance(ms) {
       const target = now + ms;
       for (;;) {
@@ -54,14 +64,28 @@ function fakeClock(start = Date.parse("2026-11-06T08:00:00Z")) {
     },
   };
 }
-const header = "source_code,name,ean,price,currency,quantity,warehouse,observed_at\n";
+const header =
+  "source_code,name,ean,price,currency,quantity,warehouse,observed_at\n";
 const row = (sku, qty, wh = "main", extra = {}) =>
-  [sku, extra.name ?? "Product " + sku, extra.ean ?? "", extra.price ?? "9.90", extra.currency ?? "EUR", qty, wh, "2026-11-06T07:55:00Z"].join(",");
+  [
+    sku,
+    extra.name ?? "Product " + sku,
+    extra.ean ?? "",
+    extra.price ?? "9.90",
+    extra.currency ?? "EUR",
+    qty,
+    wh,
+    "2026-11-06T07:55:00Z",
+  ].join(",");
 async function fixture(t, clock = fakeClock(), dir) {
   dir ??= await mkdtemp(join(tmpdir(), "export-svc-"));
-  const service = new DesktopService(dir, new CredentialVault(join(dir, "credentials"), cipher), {
-    exportClock: clock,
-  });
+  const service = new DesktopService(
+    dir,
+    new CredentialVault(join(dir, "credentials"), cipher),
+    {
+      exportClock: clock,
+    },
+  );
   const busy = () => {
     try {
       return service.exports.status().running.length > 0;
@@ -86,12 +110,28 @@ test("normalization keeps every source value, validates ISO currency and never s
     onHand: null,
     available: qty,
     observedAt: "2026-11-06T07:00:00+01:00",
-    product: { source_code: sku, name: "N " + sku, price: 2.5, currency: "EUR", quantity: qty, ...product },
+    product: {
+      source_code: sku,
+      name: "N " + sku,
+      price: 2.5,
+      currency: "EUR",
+      quantity: qty,
+      ...product,
+    },
   });
-  const ok = normalizeInventory("c1", [stock("A", "w1", 3), stock("B", "w1", 0)]);
+  const ok = normalizeInventory("c1", [
+    stock("A", "w1", 3),
+    stock("B", "w1", 0),
+  ]);
   assert.equal(ok.complete, true);
   assert.deepEqual(
-    ok.items.map((i) => [i.sku, i.quantity, i.availabilityStatus, i.currency, i.sourceUpdatedAt]),
+    ok.items.map((i) => [
+      i.sku,
+      i.quantity,
+      i.availabilityStatus,
+      i.currency,
+      i.sourceUpdatedAt,
+    ]),
     [
       ["A", 3, "in_stock", "EUR", "2026-11-06T06:00:00.000Z"],
       ["B", 0, "out_of_stock", "EUR", "2026-11-06T06:00:00.000Z"],
@@ -99,18 +139,36 @@ test("normalization keeps every source value, validates ISO currency and never s
   );
   assert.equal(ok.sourceTime, "2026-11-06T06:00:00.000Z");
 
-  const multi = normalizeInventory("c1", [stock("A", "w1", 3), stock("A", "w2", 4)]);
+  const multi = normalizeInventory("c1", [
+    stock("A", "w1", 3),
+    stock("A", "w2", 4),
+  ]);
   assert.equal(multi.complete, false);
   assert.equal(multi.issues[0].code, "multiple_warehouses");
-  const one = normalizeInventory("c1", [stock("A", "w1", 3), stock("A", "w2", 4)], { warehouse: "w2" });
+  const one = normalizeInventory(
+    "c1",
+    [stock("A", "w1", 3), stock("A", "w2", 4)],
+    { warehouse: "w2" },
+  );
   assert.equal(one.complete, true);
-  assert.deepEqual(one.items.map((i) => [i.warehouse, i.quantity]), [["w2", 4]]);
-  assert.equal(normalizeInventory("c1", [stock("A", "w1", 3)], { warehouse: "w9" }).issues[0].code, "warehouse_not_found");
+  assert.deepEqual(
+    one.items.map((i) => [i.warehouse, i.quantity]),
+    [["w2", 4]],
+  );
+  assert.equal(
+    normalizeInventory("c1", [stock("A", "w1", 3)], { warehouse: "w9" })
+      .issues[0].code,
+    "warehouse_not_found",
+  );
 
-  const bad = normalizeInventory("c1", [stock("A", "w1", 3, { currency: "EUX" })]);
+  const bad = normalizeInventory("c1", [
+    stock("A", "w1", 3, { currency: "EUX" }),
+  ]);
   assert.equal(bad.complete, false);
   assert.equal(bad.issues[0].code, "invalid_currency");
-  const noCatalogue = normalizeInventory("c1", [{ ...stock("A", "w1", 1), product: undefined }]);
+  const noCatalogue = normalizeInventory("c1", [
+    { ...stock("A", "w1", 1), product: undefined },
+  ]);
   assert.equal(noCatalogue.issues[0].code, "missing_catalogue");
   assert.equal(normalizeInventory("c1", []).issues[0].code, "empty");
 
@@ -120,7 +178,10 @@ test("normalization keeps every source value, validates ISO currency and never s
     stock("C", "w1", 1, { ean: "4006381333932" }),
   ]);
   assert.equal(eans.complete, true);
-  assert.deepEqual(eans.issues.map((i) => i.code).sort(), ["duplicate_ean", "ean_checksum"]);
+  assert.deepEqual(eans.issues.map((i) => i.code).sort(), [
+    "duplicate_ean",
+    "ean_checksum",
+  ]);
   assert.equal(gtinChecksumValid("4006381333931"), true);
   assert.equal(gtinChecksumValid("ABC"), null);
 });
@@ -128,17 +189,38 @@ test("normalization keeps every source value, validates ISO currency and never s
 test("published export carries manifest protocol fields and a reader detects tampering", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "publish-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
-  await writeFile(join(dir, "stock.csv.00000000-0000-0000-0000-000000000000.tmp"), "stale");
+  await writeFile(
+    join(dir, "stock.csv.00000000-0000-0000-0000-000000000000.tmp"),
+    "stale",
+  );
   const result = await exportStock(
     dir,
-    [{ source_code: "A", name: "Alpha", price: 1, currency: "EUR", quantity: 2, warehouse: "main", availability_status: "in_stock", source_updated_at: "2026-11-06T07:00:00.000Z" }],
+    [
+      {
+        source_code: "A",
+        name: "Alpha",
+        price: 1,
+        currency: "EUR",
+        quantity: 2,
+        warehouse: "main",
+        availability_status: "in_stock",
+        source_updated_at: "2026-11-06T07:00:00.000Z",
+      },
+    ],
     "src",
     { sourceTime: "2026-11-06T07:00:00.000Z" },
   );
   const files = await readdir(dir);
-  assert.deepEqual(files.sort(), ["manifest.json", "stock.csv"], "stale temporary removed");
+  assert.deepEqual(
+    files.sort(),
+    ["manifest.json", "stock.csv"],
+    "stale temporary removed",
+  );
   const csv = await readFile(join(dir, "stock.csv"), "utf8");
-  assert.match(csv, /^source_code,name,ean,price,currency,quantity,warehouse,availability_status,source_updated_at\r\n/);
+  assert.match(
+    csv,
+    /^source_code,name,ean,price,currency,quantity,warehouse,availability_status,source_updated_at\r\n/,
+  );
   const published = await readPublishedExport(dir);
   assert.equal(published.state, "ok");
   assert.equal(published.manifest.snapshot_id, result.snapshotId);
@@ -154,8 +236,16 @@ test("scheduled export runs at the default interval, records history and resumes
   const { service, dir, clock } = await fixture(t);
   const source = join(dir, "pos.csv");
   await writeFile(source, header + row("A", 5) + "\n" + row("B", 0) + "\n");
-  const c = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read" });
-  const job = await service.saveExportJob({ connectionId: c.id, enabled: true });
+  const c = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+  });
+  const job = await service.saveExportJob({
+    connectionId: c.id,
+    enabled: true,
+  });
   assert.equal(job.intervalMinutes, 15, "default interval");
   // First run is overdue (never attempted) and starts within the 5–35 s startup spread.
   assert.ok(clock.pending()[0] <= 35000);
@@ -172,7 +262,9 @@ test("scheduled export runs at the default interval, records history and resumes
   assert.equal(snap.overview.connections[0].health, "healthy");
   assert.ok(snap.overview.connections[0].lastReadAt);
   // The next run is planned one interval after the attempt, not during it.
-  const next = Date.parse(snap.exportJobs[0].nextRunAt) - Date.parse(snap.exportJobs[0].lastAttemptAt);
+  const next =
+    Date.parse(snap.exportJobs[0].nextRunAt) -
+    Date.parse(snap.exportJobs[0].lastAttemptAt);
   assert.equal(next, 15 * 60000);
   assert.equal(service.products(c.id).lastSnapshot.length, 2);
 
@@ -183,18 +275,34 @@ test("scheduled export runs at the default interval, records history and resumes
   assert.equal(reopened.service.snapshot().exportJobs[0].enabled, true);
   assert.ok(clock2.pending()[0] <= 35000, "overdue schedule resumes promptly");
   await clock2.advance(35000);
-  assert.equal(reopened.service.snapshot().exportRuns.filter((r) => r.state === "ok").length, 2);
+  assert.equal(
+    reopened.service.snapshot().exportRuns.filter((r) => r.state === "ok")
+      .length,
+    2,
+  );
 });
 
 test("incomplete or invalid reads are held, preserve the last export and retry with backoff", async (t) => {
   const { service, dir, clock } = await fixture(t);
   const source = join(dir, "pos.csv");
   await writeFile(source, header + row("A", 5) + "\n");
-  const c = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read" });
-  await service.saveExportJob({ connectionId: c.id, enabled: true, intervalMinutes: 30 });
+  const c = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+  });
+  await service.saveExportJob({
+    connectionId: c.id,
+    enabled: true,
+    intervalMinutes: 30,
+  });
   await clock.advance(35000);
   const out = join(dir, "exports", c.id);
-  const before = [await readFile(join(out, "stock.csv"), "utf8"), await readFile(join(out, "manifest.json"), "utf8")];
+  const before = [
+    await readFile(join(out, "stock.csv"), "utf8"),
+    await readFile(join(out, "manifest.json"), "utf8"),
+  ];
 
   for (const broken of [
     header, // empty
@@ -211,7 +319,10 @@ test("incomplete or invalid reads are held, preserve the last export and retry w
   const job = service.snapshot().exportJobs[0];
   assert.equal(job.consecutiveFailures, 4);
   // Backoff 1,2,4,8 min capped by the 30 min interval.
-  assert.equal(Date.parse(job.nextRunAt) - Date.parse(job.lastAttemptAt), 8 * 60000);
+  assert.equal(
+    Date.parse(job.nextRunAt) - Date.parse(job.lastAttemptAt),
+    8 * 60000,
+  );
   assert.ok(service.snapshot().overview.errors.length === 1);
   await writeFile(source, header + row("A", 4) + "\n");
   await clock.advance(8 * 60000);
@@ -225,9 +336,20 @@ test("incomplete or invalid reads are held, preserve the last export and retry w
 test("overlapping exports are prevented and the shrink guard holds a suspicious snapshot", async (t) => {
   const { service, dir } = await fixture(t);
   const source = join(dir, "pos.csv");
-  await writeFile(source, header + ["A", "B", "C", "D"].map((s) => row(s, 1)).join("\n") + "\n");
-  const c = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read" });
-  const [first, second] = await Promise.allSettled([service.exportNow(c.id), service.exportNow(c.id)]);
+  await writeFile(
+    source,
+    header + ["A", "B", "C", "D"].map((s) => row(s, 1)).join("\n") + "\n",
+  );
+  const c = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+  });
+  const [first, second] = await Promise.allSettled([
+    service.exportNow(c.id),
+    service.exportNow(c.id),
+  ]);
   assert.equal(first.value.state, "ok");
   assert.match(second.reason.message, /already running/);
   await writeFile(source, header + row("A", 1) + "\n");
@@ -243,17 +365,35 @@ test("interval and folder validation, persisted Start/Stop and interrupted-run r
   const { service, dir, clock } = await fixture(t);
   const source = join(dir, "pos.csv");
   await writeFile(source, header + row("A", 1) + "\n");
-  const c = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read" });
+  const c = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+  });
   for (const intervalMinutes of [4, 1441, 7.5])
-    await assert.rejects(service.saveExportJob({ connectionId: c.id, intervalMinutes }), /Interval/);
-  await assert.rejects(service.saveExportJob({ connectionId: c.id, directory: "relative/out" }), /absolute/);
+    await assert.rejects(
+      service.saveExportJob({ connectionId: c.id, intervalMinutes }),
+      /Interval/,
+    );
+  await assert.rejects(
+    service.saveExportJob({ connectionId: c.id, directory: "relative/out" }),
+    /absolute/,
+  );
   const custom = join(dir, "handover");
-  const job = await service.saveExportJob({ connectionId: c.id, enabled: true, intervalMinutes: 45, directory: custom });
+  const job = await service.saveExportJob({
+    connectionId: c.id,
+    enabled: true,
+    intervalMinutes: 45,
+    directory: custom,
+  });
   assert.equal(job.intervalMinutes, 45);
   assert.equal(service.setSchedulerPaused(true).paused, true);
   assert.equal(clock.timers.size, 0, "stopped scheduler keeps no timers");
   service.store.db
-    .prepare("INSERT INTO export_runs(connection_id,trigger,started_at,state) VALUES(?,?,?,'running')")
+    .prepare(
+      "INSERT INTO export_runs(connection_id,trigger,started_at,state) VALUES(?,?,?,'running')",
+    )
     .run(c.id, "schedule", new Date().toISOString());
   await service.close();
   const reopened = await fixture(t, fakeClock(), dir);
@@ -270,41 +410,107 @@ test("negative quantities follow the explicit source rule and logs never store s
   const { service, dir } = await fixture(t);
   const source = join(dir, "pos.csv");
   await writeFile(source, header + row("A", -2) + "\n" + row("B", 3) + "\n");
-  const c = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read" });
-  assert.notEqual((await service.exportNow(c.id)).state, "ok", "default rule rejects negatives");
+  const c = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+  });
+  assert.notEqual(
+    (await service.exportNow(c.id)).state,
+    "ok",
+    "default rule rejects negatives",
+  );
   await service.saveConnection({ ...c, negativeStock: "zero" });
   const r = await service.exportNow(c.id);
   assert.equal(r.state, "ok");
   const csv = await readFile(join(dir, "exports", c.id, "stock.csv"), "utf8");
   assert.match(csv, /"A","Product A","","9.9","EUR","0","main","out_of_stock"/);
-  await assert.rejects(service.saveConnection({ name: "W", platform: "woocommerce", baseUrl: "https://x.test", permission: "read", negativeStock: "zero" }), /Negative stock/);
+  await assert.rejects(
+    service.saveConnection({
+      name: "W",
+      platform: "woocommerce",
+      baseUrl: "https://x.test",
+      permission: "read",
+      negativeStock: "zero",
+    }),
+    /Negative stock/,
+  );
 
-  service.log("cloud_test", { id: "x", token: "cdt_abcdefghijklmnop", note: "Authorization: Bearer abc.def.ghi123", url: "https://user:pass@host/x?token=zzz" });
-  const stored = JSON.stringify(service.snapshot().logs[0]);
-  assert.doesNotMatch(stored, /abcdefghijklmnop|abc\.def\.ghi123|user:pass|zzz/);
-  assert.deepEqual(redact({ nested: { password: "p", list: ["shpat_0123456789abcdef"] } }), {
-    nested: { password: "[redacted]", list: ["shpat_[redacted]"] },
+  service.log("cloud_test", {
+    id: "x",
+    token: "cdt_abcdefghijklmnop",
+    note: "Authorization: Bearer abc.def.ghi123",
+    url: "https://user:pass@host/x?token=zzz",
   });
+  const stored = JSON.stringify(service.snapshot().logs[0]);
+  assert.doesNotMatch(
+    stored,
+    /abcdefghijklmnop|abc\.def\.ghi123|user:pass|zzz/,
+  );
+  assert.deepEqual(
+    redact({ nested: { password: "p", list: ["shpat_0123456789abcdef"] } }),
+    {
+      nested: { password: "[redacted]", list: ["shpat_[redacted]"] },
+    },
+  );
 });
 
 test("settings validation and credential-free mapping configuration export/import", async (t) => {
   const { service, dir } = await fixture(t);
-  assert.throws(() => service.updateSettings({ unknown: 1 }), /Unknown setting/);
-  assert.throws(() => service.updateSettings({ exportRoot: "out" }), /absolute/);
+  assert.throws(
+    () => service.updateSettings({ unknown: 1 }),
+    /Unknown setting/,
+  );
+  assert.throws(
+    () => service.updateSettings({ exportRoot: "out" }),
+    /absolute/,
+  );
   assert.throws(() => service.updateSettings({ language: "xx" }), /language/);
-  assert.equal(service.updateSettings({ language: "sk", defaultIntervalMinutes: 30 }).language, "sk");
+  assert.equal(
+    service.updateSettings({ language: "sk", defaultIntervalMinutes: 30 })
+      .language,
+    "sk",
+  );
   const source = join(dir, "pos.csv");
   await writeFile(source, header + row("A", 1) + "\n");
-  const file = await service.saveConnection({ name: "POS", platform: "file", stockPath: source, permission: "read", productMappings: { A: "shared-a" } });
-  await service.saveConnection({ name: "Shop", platform: "shopify", shopDomain: "x.myshopify.com", permission: "read", token: "shpat_secretvalue123" });
-  await service.saveExportJob({ connectionId: file.id, enabled: true, warehouse: "main" });
+  const file = await service.saveConnection({
+    name: "POS",
+    platform: "file",
+    stockPath: source,
+    permission: "read",
+    productMappings: { A: "shared-a" },
+  });
+  await service.saveConnection({
+    name: "Shop",
+    platform: "shopify",
+    shopDomain: "x.myshopify.com",
+    permission: "read",
+    token: "shpat_secretvalue123",
+  });
+  await service.saveExportJob({
+    connectionId: file.id,
+    enabled: true,
+    warehouse: "main",
+  });
   const config = service.mappingConfig();
   assert.doesNotMatch(JSON.stringify(config), /shpat_|secretvalue|enc:/);
-  assert.equal(config.exportJobs[0].intervalMinutes, 30, "new default interval applied");
+  assert.equal(
+    config.exportJobs[0].intervalMinutes,
+    30,
+    "new default interval applied",
+  );
   config.connections[0].productMappings = { A: "shared-b" };
   const result = await service.importMappingConfig(config);
   assert.equal(result.connections, 2);
   assert.deepEqual(service.connections()[0].productMappings, { A: "shared-b" });
-  assert.equal(service.snapshot().exportJobs[0].enabled, false, "imported schedules stay disabled");
-  await assert.rejects(service.importMappingConfig({ format: "other" }), /Unsupported/);
+  assert.equal(
+    service.snapshot().exportJobs[0].enabled,
+    false,
+    "imported schedules stay disabled",
+  );
+  await assert.rejects(
+    service.importMappingConfig({ format: "other" }),
+    /Unsupported/,
+  );
 });

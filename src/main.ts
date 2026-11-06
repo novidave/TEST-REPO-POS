@@ -16,7 +16,12 @@ import { readFile, writeFile } from "node:fs/promises";
 import { CloudApiError } from "../docs/cloud-api/client/client";
 import { CloudAgent, type CloudSettings } from "./cloud-agent";
 import { DesktopService } from "./desktop";
-import { CredentialVault, atomicJson, publicError, UserError } from "./security";
+import {
+  CredentialVault,
+  atomicJson,
+  publicError,
+  UserError,
+} from "./security";
 
 let service: DesktopService;
 let cloud: CloudAgent;
@@ -71,10 +76,13 @@ function updateTray() {
   if (!tray) return;
   const paused = service.settings.get().schedulerPaused;
   const jobs = service.exports.jobs().filter((j) => j.enabled);
-  const last = service.exports.lastSuccessful() as { finished_at?: string } | undefined;
+  const last = service.exports.lastSuccessful() as
+    { finished_at?: string } | undefined;
   tray.setToolTip(
     `TEST-REPO-POS inventory agent\n${paused ? "Scheduled exports stopped" : `${jobs.length} scheduled export(s)`}` +
-      (last?.finished_at ? `\nLast export ${new Date(last.finished_at).toLocaleString()}` : ""),
+      (last?.finished_at
+        ? `\nLast export ${new Date(last.finished_at).toLocaleString()}`
+        : ""),
   );
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -102,11 +110,15 @@ function updateTray() {
 function createTray() {
   const headless =
     app.commandLine.getSwitchValue("ozone-platform") === "headless" ||
-    (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY);
+    (process.platform === "linux" &&
+      !process.env.DISPLAY &&
+      !process.env.WAYLAND_DISPLAY);
   // GTK cannot create a tray icon without a display; the window then closes the app as before.
   if (tray || headless || process.argv.includes("--smoke-test")) return;
   try {
-    const icon = nativeImage.createFromPath(join(__dirname, "../../assets/tray.png"));
+    const icon = nativeImage.createFromPath(
+      join(__dirname, "../../assets/tray.png"),
+    );
     tray = new Tray(icon);
     tray.on("click", showWindow);
     updateTray();
@@ -132,8 +144,12 @@ async function setup() {
     features: () => {
       const s = service.settings.get();
       return {
-        snapshots: s.cloudSnapshotsEnabled || process.env.CACADUU_ENABLE_SNAPSHOTS === "true",
-        commands: s.cloudCommandsEnabled || process.env.CACADUU_ENABLE_COMMANDS === "true",
+        snapshots:
+          s.cloudSnapshotsEnabled ||
+          process.env.CACADUU_ENABLE_SNAPSHOTS === "true",
+        commands:
+          s.cloudCommandsEnabled ||
+          process.env.CACADUU_ENABLE_COMMANDS === "true",
       };
     },
     lastRead: () => {
@@ -141,10 +157,15 @@ async function setup() {
       const connection = service.connections().find((c) => c.id === id);
       const run = id
         ? (service.exports.history(1, id)[0] as
-            | { state: string; finished_at: string | null; message: string | null }
+            | {
+                state: string;
+                finished_at: string | null;
+                message: string | null;
+              }
             | undefined)
         : undefined;
-      if (!connection || !run || run.state === "running") return { sourceLabel: connection?.name, result: "none" };
+      if (!connection || !run || run.state === "running")
+        return { sourceLabel: connection?.name, result: "none" };
       return {
         sourceLabel: connection.name,
         result: run.state === "ok" ? "ok" : "error",
@@ -154,13 +175,22 @@ async function setup() {
     },
     runSyncCommand: async () => {
       const id = service.settings.get().cloudSourceConnectionId;
-      if (!id) return { state: "failed", message: "No cloud source connection is configured in the agent" };
+      if (!id)
+        return {
+          state: "failed",
+          message: "No cloud source connection is configured in the agent",
+        };
       return service.exports.runNow(id, "cloud_command");
     },
     log: (event, detail) => service.log(event, detail),
   });
   await cloud.init(process.env.CACADUU_PAIRING_URL || "");
-  service.onExportPublished = async (connectionId, snapshot, result, trigger) => {
+  service.onExportPublished = async (
+    connectionId,
+    snapshot,
+    result,
+    trigger,
+  ) => {
     if (service.settings.get().cloudSourceConnectionId !== connectionId) return;
     const upload = cloud.offerSnapshot(
       connectionId,
@@ -222,7 +252,12 @@ async function setup() {
   });
   handle("desktop:snapshot", () => ({
     ...service.snapshot(),
-    app: { version: app.getVersion(), platform: process.platform, loginItem: loginItemState(), tray: Boolean(tray) },
+    app: {
+      version: app.getVersion(),
+      platform: process.platform,
+      loginItem: loginItemState(),
+      tray: Boolean(tray),
+    },
   }));
   handle("desktop:save-connection", (value) => service.saveConnection(value));
   handle("desktop:test-connection", (id) =>
@@ -256,11 +291,16 @@ async function setup() {
     service.previewNormalized(string(id, 200)),
   );
   handle("desktop:products", (id) =>
-    service.products(id === undefined || id === null ? undefined : string(id, 200)),
+    service.products(
+      id === undefined || id === null ? undefined : string(id, 200),
+    ),
   );
   handle("desktop:open-export-folder", async (id) => {
-    const job = service.exports.jobs().find((j) => j.connectionId === string(id, 200));
-    const directory = job?.effectiveDirectory ?? join(service.exportRoot(), string(id, 200));
+    const job = service.exports
+      .jobs()
+      .find((j) => j.connectionId === string(id, 200));
+    const directory =
+      job?.effectiveDirectory ?? join(service.exportRoot(), string(id, 200));
     const error = await shell.openPath(directory);
     if (error) throw new UserError("Export folder not available yet");
   });
@@ -270,7 +310,10 @@ async function setup() {
       filters: [{ name: "Mapping configuration", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) return null;
-    await writeFile(result.filePath, JSON.stringify(service.mappingConfig(), null, 2) + "\n");
+    await writeFile(
+      result.filePath,
+      JSON.stringify(service.mappingConfig(), null, 2) + "\n",
+    );
     return { path: result.filePath };
   });
   handle("desktop:mapping-import", async () => {
@@ -289,6 +332,13 @@ async function setup() {
     }
     return service.importMappingConfig(parsed);
   });
+  handle("desktop:local-inventory", () => service.localInventory());
+  handle("desktop:local-save-product", (value) =>
+    service.localSaveProduct(value),
+  );
+  handle("desktop:local-adjust", (value) => service.localAdjust(value));
+  handle("desktop:local-import", (path) => service.localImport(path));
+  handle("desktop:local-lookup", (code) => service.localLookup(code));
   handle("cloud:config", () => cloud.config());
   handle("cloud:url", (url) => cloud.setUrl(url));
   handle("cloud:pair", (code, name) => cloud.pair(code, name));

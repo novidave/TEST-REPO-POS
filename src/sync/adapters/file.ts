@@ -66,7 +66,11 @@ export class FileInventoryAdapter implements InventoryAdapter {
   }
   /** Negative quantities are refused unless the connection explicitly maps them to sold out (0). */
   private negative(value: number): number {
-    if (this.negativeStock === "zero" && Number.isSafeInteger(value) && value < 0) {
+    if (
+      this.negativeStock === "zero" &&
+      Number.isSafeInteger(value) &&
+      value < 0
+    ) {
       this.negativeRowsZeroed++;
       return 0;
     }

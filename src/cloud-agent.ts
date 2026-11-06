@@ -23,7 +23,12 @@ export interface CloudSettings {
   deviceId?: string;
   shopName?: string;
   /** Last snapshot the server applied (Phase B), for unchanged-stock confirmation. */
-  lastApplied?: { snapshotId: string; contentHash: string; productsHash: string; sourceTime: string };
+  lastApplied?: {
+    snapshotId: string;
+    contentHash: string;
+    productsHash: string;
+    sourceTime: string;
+  };
   /** Command IDs already handled, to never run a command twice. Bounded. */
   handledCommands?: string[];
   updateRequired?: string | null;
@@ -37,9 +42,16 @@ export interface CloudAgentDeps {
   os: string;
   features(): { snapshots: boolean; commands: boolean };
   /** Heartbeat summary of the last local read; never contains secrets. */
-  lastRead(): { sourceLabel?: string; result: ReadResult; at?: string; error?: string | null };
+  lastRead(): {
+    sourceLabel?: string;
+    result: ReadResult;
+    at?: string;
+    error?: string | null;
+  };
   /** Runs a full local export for a sync_inventory command (which offers the snapshot via offerSnapshot). */
-  runSyncCommand(commandId: string): Promise<{ state: string; message: string }>;
+  runSyncCommand(
+    commandId: string,
+  ): Promise<{ state: string; message: string }>;
   log(event: string, detail: Record<string, unknown>): void;
   fetch?: typeof fetch;
   clock?: TimerClock;
@@ -50,7 +62,8 @@ const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
 const PROCESSING_POLL_MS = 5000;
 const PROCESSING_LIMIT_MS = 5 * 60 * 1000;
 const LEASE_RENEW_MS = 60 * 1000;
-const CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}-?[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/;
+const CODE =
+  /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}-?[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/;
 
 /** Owns CACADUU pairing, heartbeat, rotation and the feature-flagged Phase B/C flows. Optional by design. */
 export class CloudAgent {
@@ -64,7 +77,10 @@ export class CloudAgent {
   private lastFullUploadAt = 0;
   /** The sync_inventory command whose export is running; its snapshot is uploaded with command_id. */
   activeCommandId: string | null = null;
-  private commandUploads = new Map<string, SnapshotState | { state: "confirmed"; snapshot_id: string }>();
+  private commandUploads = new Map<
+    string,
+    SnapshotState | { state: "confirmed"; snapshot_id: string }
+  >();
   readonly status = {
     lastHeartbeatAt: null as string | null,
     nextHeartbeatAt: null as string | null,
@@ -74,7 +90,12 @@ export class CloudAgent {
     pairAgain: false,
     snapshots: "disabled" as FeatureState,
     commands: "disabled" as FeatureState,
-    lastSnapshot: null as null | { at: string; state: string; snapshotId?: string; detail?: string },
+    lastSnapshot: null as null | {
+      at: string;
+      state: string;
+      snapshotId?: string;
+      detail?: string;
+    },
   };
   private readonly clock: TimerClock;
   constructor(private readonly deps: CloudAgentDeps) {
@@ -83,11 +104,13 @@ export class CloudAgent {
   async init(defaultUrl = "") {
     const loaded = await this.deps.load();
     this.settings = { ...loaded, apiBaseUrl: loaded.apiBaseUrl || defaultUrl };
-    if (this.settings.updateRequired) this.status.minAgentVersion = this.settings.updateRequired;
+    if (this.settings.updateRequired)
+      this.status.minAgentVersion = this.settings.updateRequired;
   }
   /** Serializes all cloud state changes (pairing, rotation, heartbeat). */
   private serial<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.stopped) return Promise.reject(new UserError("Application is closing"));
+    if (this.stopped)
+      return Promise.reject(new UserError("Application is closing"));
     const result = this.queue.then(operation);
     this.queue = result.catch(() => {});
     return result;
@@ -112,33 +135,43 @@ export class CloudAgent {
   }
   private token(): string | null {
     if (!this.settings.tokenEncrypted) return null;
-    if (!secureAvailable(this.deps.cipher)) throw new UserError("OS secure storage unavailable");
-    return this.deps.cipher.decryptString(Buffer.from(this.settings.tokenEncrypted, "base64"));
+    if (!secureAvailable(this.deps.cipher))
+      throw new UserError("OS secure storage unavailable");
+    return this.deps.cipher.decryptString(
+      Buffer.from(this.settings.tokenEncrypted, "base64"),
+    );
   }
   private async persist(next: CloudSettings) {
     await this.deps.save(next);
     this.settings = next;
   }
   private client() {
-    if (!this.settings.apiBaseUrl) throw new UserError("Set the HTTPS pairing URL first");
+    if (!this.settings.apiBaseUrl)
+      throw new UserError("Set the HTTPS pairing URL first");
     return new CacaduuCloudClient({
       baseUrl: httpsUrl(this.settings.apiBaseUrl),
       agentVersion: this.deps.agentVersion,
       getToken: () => this.token(),
-      fetch: (url, init) => (this.deps.fetch ?? fetch)(url, { ...init, redirect: "error" }),
+      fetch: (url, init) =>
+        (this.deps.fetch ?? fetch)(url, { ...init, redirect: "error" }),
       onBaseUrl: async (url) => {
         await this.persist({ ...this.settings, apiBaseUrl: httpsUrl(url) });
-        this.deps.log("cloud_base_url_updated", { apiBaseUrl: this.settings.apiBaseUrl });
+        this.deps.log("cloud_base_url_updated", {
+          apiBaseUrl: this.settings.apiBaseUrl,
+        });
       },
     });
   }
   /** Every answer carries poll info: clock skew and minimum version warnings. */
   private observe(info: Partial<PollInfo>) {
     if (info.server_time) {
-      const skew = Math.round((Date.parse(info.server_time) - this.clock.now()) / 1000);
+      const skew = Math.round(
+        (Date.parse(info.server_time) - this.clock.now()) / 1000,
+      );
       if (Number.isFinite(skew)) this.status.clockSkewSeconds = skew;
     }
-    if (info.min_agent_version) this.status.minAgentVersion = info.min_agent_version;
+    if (info.min_agent_version)
+      this.status.minAgentVersion = info.min_agent_version;
   }
   /** Contract error handling shared by all calls: 401 forgets the token, 426 stops calling. */
   private async handleError(e: unknown) {
@@ -149,9 +182,14 @@ export class CloudAgent {
         await this.persist(rest);
         this.status.pairAgain = true;
         this.cancelTimer();
-        this.deps.log("cloud_unauthorized", { message: "Pair this computer again" });
+        this.deps.log("cloud_unauthorized", {
+          message: "Pair this computer again",
+        });
       } else if (e.status === 426) {
-        const min = typeof e.body.min_agent_version === "string" ? e.body.min_agent_version : "newer";
+        const min =
+          typeof e.body.min_agent_version === "string"
+            ? e.body.min_agent_version
+            : "newer";
         await this.persist({ ...this.settings, updateRequired: min });
         this.cancelTimer();
         this.deps.log("cloud_update_required", { minAgentVersion: min });
@@ -169,18 +207,28 @@ export class CloudAgent {
   }
   async pair(code: unknown, name: unknown) {
     return this.serial(async () => {
-      if (!secureAvailable(this.deps.cipher)) throw new UserError("OS secure storage unavailable");
+      if (!secureAvailable(this.deps.cipher))
+        throw new UserError("OS secure storage unavailable");
       if (this.paired) throw new UserError("Already paired");
-      const pairingCode = String(code ?? "").replace(/\s+/g, "").toUpperCase();
+      const pairingCode = String(code ?? "")
+        .replace(/\s+/g, "")
+        .toUpperCase();
       if (!CODE.test(pairingCode)) throw new UserError("Invalid pairing code");
       const deviceName = String(name ?? "").trim();
-      if (!deviceName || deviceName.length > 100) throw new UserError("Device name required");
-      const response = await this.client().pair(pairingCode, deviceName, this.deps.os);
+      if (!deviceName || deviceName.length > 100)
+        throw new UserError("Device name required");
+      const response = await this.client().pair(
+        pairingCode,
+        deviceName,
+        this.deps.os,
+      );
       this.observe(response);
       // Store the token (encrypted) before anything else uses it.
       await this.persist({
         ...this.settings,
-        tokenEncrypted: this.deps.cipher.encryptString(response.device_token).toString("base64"),
+        tokenEncrypted: this.deps.cipher
+          .encryptString(response.device_token)
+          .toString("base64"),
         deviceId: response.device_id,
         shopName: response.shop.name,
         apiBaseUrl: httpsUrl(response.api_base_url || this.settings.apiBaseUrl),
@@ -190,7 +238,10 @@ export class CloudAgent {
       });
       this.status.pairAgain = false;
       this.failures = 0;
-      this.deps.log("cloud_paired", { deviceId: response.device_id, shop: response.shop.name });
+      this.deps.log("cloud_paired", {
+        deviceId: response.device_id,
+        shop: response.shop.name,
+      });
       this.schedule(response.next_poll_seconds * 1000);
       return { deviceId: response.device_id, shopName: response.shop.name };
     });
@@ -199,7 +250,11 @@ export class CloudAgent {
     try {
       const r = await this.client().status();
       this.observe(r);
-      return { state: r.state, shopName: r.shop.name, lastSync: r.last_sync?.at ?? null };
+      return {
+        state: r.state,
+        shopName: r.shop.name,
+        lastSync: r.last_sync?.at ?? null,
+      };
     } catch (e) {
       await this.handleError(e);
       throw e;
@@ -212,9 +267,13 @@ export class CloudAgent {
         this.observe(r);
         await this.persist({
           ...this.settings,
-          tokenEncrypted: this.deps.cipher.encryptString(r.device_token).toString("base64"),
+          tokenEncrypted: this.deps.cipher
+            .encryptString(r.device_token)
+            .toString("base64"),
         });
-        this.deps.log("cloud_rotated", { oldTokenValidUntil: r.old_token_valid_until });
+        this.deps.log("cloud_rotated", {
+          oldTokenValidUntil: r.old_token_valid_until,
+        });
         return { rotated: true };
       } catch (e) {
         await this.handleError(e);
@@ -225,7 +284,13 @@ export class CloudAgent {
   async forget() {
     return this.serial(async () => {
       this.cancelTimer();
-      const { tokenEncrypted: _t, deviceId: _d, shopName: _s, lastApplied: _l, ...rest } = this.settings;
+      const {
+        tokenEncrypted: _t,
+        deviceId: _d,
+        shopName: _s,
+        lastApplied: _l,
+        ...rest
+      } = this.settings;
       await this.persist({ ...rest, handledCommands: [] });
       this.deps.log("cloud_forgotten_locally", {});
     });
@@ -244,7 +309,9 @@ export class CloudAgent {
     this.cancelTimer();
     if (this.stopped || !this.paired || this.settings.updateRequired) return;
     const delay = Math.max(15000, Number.isFinite(ms) ? ms : 60000);
-    this.status.nextHeartbeatAt = new Date(this.clock.now() + delay).toISOString();
+    this.status.nextHeartbeatAt = new Date(
+      this.clock.now() + delay,
+    ).toISOString();
     this.timer = this.clock.setTimeout(() => {
       this.timer = undefined;
       void this.heartbeat().catch(() => {});
@@ -252,7 +319,8 @@ export class CloudAgent {
   }
   /** Contract backoff: 5 s · 2ⁿ ± 20 %, at most 5 minutes, unless Retry-After says otherwise. */
   backoff(retryAfterSeconds?: number | null) {
-    if (retryAfterSeconds && retryAfterSeconds > 0) return retryAfterSeconds * 1000;
+    if (retryAfterSeconds && retryAfterSeconds > 0)
+      return retryAfterSeconds * 1000;
     const base = Math.min(300000, 5000 * 2 ** Math.min(this.failures, 10));
     const jitter = 1 + ((this.deps.random ?? Math.random)() * 0.4 - 0.2);
     return Math.min(300000, Math.round(base * jitter));
@@ -260,7 +328,8 @@ export class CloudAgent {
   heartbeat() {
     return this.serial(async () => {
       if (this.heartbeatRunning) throw new UserError("Heartbeat in progress");
-      if (this.settings.updateRequired) throw new UserError("Update the agent before contacting CACADUU");
+      if (this.settings.updateRequired)
+        throw new UserError("Update the agent before contacting CACADUU");
       this.heartbeatRunning = true;
       try {
         const read = this.deps.lastRead();
@@ -277,8 +346,14 @@ export class CloudAgent {
         this.failures = 0;
         this.status.lastError = null;
         this.status.lastHeartbeatAt = new Date(this.clock.now()).toISOString();
-        if (response.shop?.name && response.shop.name !== this.settings.shopName)
-          await this.persist({ ...this.settings, shopName: response.shop.name });
+        if (
+          response.shop?.name &&
+          response.shop.name !== this.settings.shopName
+        )
+          await this.persist({
+            ...this.settings,
+            shopName: response.shop.name,
+          });
         this.schedule(response.next_poll_seconds * 1000);
         if (Array.isArray(response.commands) && response.commands.length)
           void this.handleCommands(response.commands);
@@ -291,7 +366,12 @@ export class CloudAgent {
       } catch (e) {
         await this.handleError(e);
         this.failures++;
-        if (!(e instanceof CloudApiError) || e.retryable) this.schedule(this.backoff(e instanceof CloudApiError ? e.retryAfterSeconds : null));
+        if (!(e instanceof CloudApiError) || e.retryable)
+          this.schedule(
+            this.backoff(
+              e instanceof CloudApiError ? e.retryAfterSeconds : null,
+            ),
+          );
         else if (e.status !== 401 && e.status !== 426) this.schedule(300000);
         throw e;
       } finally {
@@ -301,7 +381,11 @@ export class CloudAgent {
   }
   // ---------------------------------------------------------------- phase B
   /** Builds the exact uncompressed snapshot bytes; content_hash is their SHA-256. */
-  static snapshotBytes(snapshotId: string, sourceId: string, snapshot: NormalizedSnapshot) {
+  static snapshotBytes(
+    snapshotId: string,
+    sourceId: string,
+    snapshot: NormalizedSnapshot,
+  ) {
     const products: Product[] = snapshot.items.map((i) => ({
       source_code: i.sku,
       name: i.name,
@@ -324,7 +408,9 @@ export class CloudAgent {
     return {
       bytes,
       contentHash: createHash("sha256").update(bytes).digest("hex"),
-      productsHash: createHash("sha256").update(JSON.stringify(products)).digest("hex"),
+      productsHash: createHash("sha256")
+        .update(JSON.stringify(products))
+        .digest("hex"),
       sourceTime: body.source_time,
       count: products.length,
     };
@@ -339,12 +425,21 @@ export class CloudAgent {
     snapshot: NormalizedSnapshot,
     commandId: string | null = null,
   ): Promise<{ state: string; snapshotId?: string }> {
-    if (!this.deps.features().snapshots || !this.paired) return { state: "disabled" };
+    if (!this.deps.features().snapshots || !this.paired)
+      return { state: "disabled" };
     if (this.settings.updateRequired) return { state: "update_required" };
-    if (!snapshot.complete || !snapshot.items.length) return { state: "incomplete" };
+    if (!snapshot.complete || !snapshot.items.length)
+      return { state: "incomplete" };
     const built = CloudAgent.snapshotBytes(snapshotId, sourceId, snapshot);
-    const record = (state: string, extra: { snapshotId?: string; detail?: string } = {}) => {
-      this.status.lastSnapshot = { at: new Date(this.clock.now()).toISOString(), state, ...extra };
+    const record = (
+      state: string,
+      extra: { snapshotId?: string; detail?: string } = {},
+    ) => {
+      this.status.lastSnapshot = {
+        at: new Date(this.clock.now()).toISOString(),
+        state,
+        ...extra,
+      };
       this.deps.log("cloud_snapshot_" + state, {
         sourceId,
         snapshotId: extra.snapshotId,
@@ -359,16 +454,34 @@ export class CloudAgent {
       const last = this.settings.lastApplied;
       if (last && last.productsHash === built.productsHash) {
         try {
-          await client.confirmUnchanged({ content_hash: last.contentHash, source_time: built.sourceTime, command_id: commandId });
+          await client.confirmUnchanged({
+            content_hash: last.contentHash,
+            source_time: built.sourceTime,
+            command_id: commandId,
+          });
           this.status.snapshots = "ok";
-          if (commandId) this.commandUploads.set(commandId, { state: "confirmed", snapshot_id: last.snapshotId });
+          if (commandId)
+            this.commandUploads.set(commandId, {
+              state: "confirmed",
+              snapshot_id: last.snapshotId,
+            });
           return record("confirmed", { snapshotId: last.snapshotId });
         } catch (e) {
-          if (!(e instanceof CloudApiError && e.status === 409 && e.code === "send_full_snapshot")) throw e;
+          if (!(
+            e instanceof CloudApiError &&
+            e.status === 409 &&
+            e.code === "send_full_snapshot"
+          ))
+            throw e;
         }
       }
-      if (!commandId && this.clock.now() - this.lastFullUploadAt < SNAPSHOT_INTERVAL_MS)
-        return record("deferred_rate_limit", { detail: "At most one full snapshot per 5 minutes" });
+      if (
+        !commandId &&
+        this.clock.now() - this.lastFullUploadAt < SNAPSHOT_INTERVAL_MS
+      )
+        return record("deferred_rate_limit", {
+          detail: "At most one full snapshot per 5 minutes",
+        });
       let state = await client.createSnapshot({
         snapshot_id: snapshotId,
         source_id: sourceId,
@@ -387,19 +500,29 @@ export class CloudAgent {
       }
       const deadline = this.clock.now() + PROCESSING_LIMIT_MS;
       while (state.state === "processing" && this.clock.now() < deadline) {
-        await new Promise((resolve) => this.clock.setTimeout(() => resolve(undefined), PROCESSING_POLL_MS));
+        await new Promise((resolve) =>
+          this.clock.setTimeout(() => resolve(undefined), PROCESSING_POLL_MS),
+        );
         state = await client.getSnapshot(snapshotId);
       }
       this.status.snapshots = "ok";
       if (state.state === "applied" || state.state === "test_ok")
         await this.persist({
           ...this.settings,
-          lastApplied: { snapshotId, contentHash: built.contentHash, productsHash: built.productsHash, sourceTime: built.sourceTime },
+          lastApplied: {
+            snapshotId,
+            contentHash: built.contentHash,
+            productsHash: built.productsHash,
+            sourceTime: built.sourceTime,
+          },
         });
       if (commandId) this.commandUploads.set(commandId, state);
       return record(state.state, {
         snapshotId,
-        detail: state.reason ?? state.error ?? (state.result ? JSON.stringify(state.result) : undefined),
+        detail:
+          state.reason ??
+          state.error ??
+          (state.result ? JSON.stringify(state.result) : undefined),
       });
     } catch (e) {
       if (isNotAvailable(e)) {
@@ -409,13 +532,21 @@ export class CloudAgent {
       await this.handleError(e);
       this.status.snapshots = "error";
       return record("failed", {
-        detail: e instanceof CloudApiError ? `HTTP ${e.status} ${e.code}` : e instanceof UserError ? e.message : "Network error",
+        detail:
+          e instanceof CloudApiError
+            ? `HTTP ${e.status} ${e.code}`
+            : e instanceof UserError
+              ? e.message
+              : "Network error",
       });
     }
   }
   // ---------------------------------------------------------------- phase C
   private async remember(id: string) {
-    const handled = [...(this.settings.handledCommands ?? []).filter((x) => x !== id), id].slice(-MAX_HANDLED);
+    const handled = [
+      ...(this.settings.handledCommands ?? []).filter((x) => x !== id),
+      id,
+    ].slice(-MAX_HANDLED);
     await this.persist({ ...this.settings, handledCommands: handled });
   }
   /** Only sync_inventory and ping are ever executed; everything else is logged and ignored. */
@@ -424,15 +555,26 @@ export class CloudAgent {
     this.commandBusy = true;
     try {
       for (const command of commands) {
-        if (!command || typeof command.id !== "string" || this.stopped) continue;
-        if ((this.settings.handledCommands ?? []).includes(command.id)) continue;
+        if (!command || typeof command.id !== "string" || this.stopped)
+          continue;
+        if ((this.settings.handledCommands ?? []).includes(command.id))
+          continue;
         if (command.type !== "sync_inventory" && command.type !== "ping") {
-          this.deps.log("cloud_command_ignored", { commandId: command.id, type: String(command.type).slice(0, 40) });
+          this.deps.log("cloud_command_ignored", {
+            commandId: command.id,
+            type: String(command.type).slice(0, 40),
+          });
           await this.remember(command.id);
           continue;
         }
-        if (command.expires_at && Date.parse(command.expires_at) <= this.clock.now()) {
-          this.deps.log("cloud_command_expired", { commandId: command.id, type: command.type });
+        if (
+          command.expires_at &&
+          Date.parse(command.expires_at) <= this.clock.now()
+        ) {
+          this.deps.log("cloud_command_expired", {
+            commandId: command.id,
+            type: command.type,
+          });
           await this.remember(command.id);
           continue;
         }
@@ -453,7 +595,9 @@ export class CloudAgent {
         return;
       }
       if (e instanceof CloudApiError && e.status === 409) {
-        this.deps.log("cloud_command_already_claimed", { commandId: command.id });
+        this.deps.log("cloud_command_already_claimed", {
+          commandId: command.id,
+        });
         await this.remember(command.id);
         return;
       }
@@ -464,21 +608,32 @@ export class CloudAgent {
     // Claimed: from here on the command is never run again by this agent.
     await this.remember(command.id);
     this.status.commands = "ok";
-    this.deps.log("cloud_command_claimed", { commandId: command.id, type: command.type });
-    const report = async (result: Parameters<CacaduuCloudClient["reportCommand"]>[1]) => {
+    this.deps.log("cloud_command_claimed", {
+      commandId: command.id,
+      type: command.type,
+    });
+    const report = async (
+      result: Parameters<CacaduuCloudClient["reportCommand"]>[1],
+    ) => {
       try {
         await client.reportCommand(command.id, result);
       } catch (e) {
         await this.handleError(e);
         this.deps.log("cloud_command_report_failed", {
           commandId: command.id,
-          detail: e instanceof CloudApiError ? `HTTP ${e.status} ${e.code}` : "Network error",
+          detail:
+            e instanceof CloudApiError
+              ? `HTTP ${e.status} ${e.code}`
+              : "Network error",
         });
       }
     };
     if (command.type === "ping") {
       await report({ state: "completed" });
-      this.deps.log("cloud_command_completed", { commandId: command.id, type: "ping" });
+      this.deps.log("cloud_command_completed", {
+        commandId: command.id,
+        type: "ping",
+      });
       return;
     }
     await report({ state: "running" });
@@ -501,16 +656,27 @@ export class CloudAgent {
         upload.snapshot_id
       ) {
         await report({ state: "completed", snapshot_id: upload.snapshot_id });
-        this.deps.log("cloud_command_completed", { commandId: command.id, snapshotId: upload.snapshot_id });
+        this.deps.log("cloud_command_completed", {
+          commandId: command.id,
+          snapshotId: upload.snapshot_id,
+        });
       } else {
         const reason = redactText(
-          result.state !== "ok" ? result.message : `Snapshot not applied (${upload?.state ?? "not uploaded"})`,
+          result.state !== "ok"
+            ? result.message
+            : `Snapshot not applied (${upload?.state ?? "not uploaded"})`,
         ).slice(0, 500);
         await report({ state: "failed", reason });
-        this.deps.log("cloud_command_failed", { commandId: command.id, reason });
+        this.deps.log("cloud_command_failed", {
+          commandId: command.id,
+          reason,
+        });
       }
     } catch (e) {
-      const reason = e instanceof UserError ? e.message.slice(0, 500) : "Local inventory read failed";
+      const reason =
+        e instanceof UserError
+          ? e.message.slice(0, 500)
+          : "Local inventory read failed";
       await report({ state: "failed", reason });
       this.deps.log("cloud_command_failed", { commandId: command.id, reason });
     } finally {

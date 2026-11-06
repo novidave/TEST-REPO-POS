@@ -7,6 +7,7 @@ export type Platform =
   | "shoptet"
   | "pos"
   | "file"
+  | "local"
   | "cacaduu";
 export type SyncMode = "master" | "two_way";
 export interface Stock {

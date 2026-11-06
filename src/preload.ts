@@ -33,6 +33,15 @@ const desktop = {
   openExportFolder: (id: string) =>
     ipcRenderer.invoke("desktop:open-export-folder", id),
   exportMapping: () => ipcRenderer.invoke("desktop:mapping-export"),
+  localInventory: () => ipcRenderer.invoke("desktop:local-inventory"),
+  localSaveProduct: (value: unknown) =>
+    ipcRenderer.invoke("desktop:local-save-product", value),
+  localAdjust: (value: unknown) =>
+    ipcRenderer.invoke("desktop:local-adjust", value),
+  localImport: (path: string) =>
+    ipcRenderer.invoke("desktop:local-import", path),
+  localLookup: (code: string) =>
+    ipcRenderer.invoke("desktop:local-lookup", code),
   importMapping: () => ipcRenderer.invoke("desktop:mapping-import"),
 };
 contextBridge.exposeInMainWorld("desktop", desktop);
