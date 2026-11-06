@@ -403,13 +403,11 @@ CREATE TABLE IF NOT EXISTS snapshot_items(connection_id TEXT NOT NULL, snapshot_
             id: connectionId,
             trigger,
             errors: errors.length,
-            first: errors
-              .slice(0, 5)
-              .map((e) => ({
-                code: e.code,
-                sku: e.sourceProductId,
-                message: e.message,
-              })),
+            first: errors.slice(0, 5).map((e) => ({
+              code: e.code,
+              sku: e.sourceProductId,
+              message: e.message,
+            })),
           });
           return { state: "held", runId, message, issues: snapshot.issues };
         }

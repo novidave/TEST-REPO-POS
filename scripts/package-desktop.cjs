@@ -21,6 +21,7 @@
       /^\/\.github($|\/)/,
       /^\/test-results($|\/)/,
       /^\/playwright/,
+      /^\/installer($|\/)/,
     ],
     ...(platform === "win32"
       ? {

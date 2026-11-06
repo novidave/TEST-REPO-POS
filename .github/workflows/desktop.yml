@@ -24,6 +24,10 @@ jobs:
         run: xvfb-run -a npm run test:electron:scale
       - if: runner.os == 'Windows'
         run: npm run test:electron:scale
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:electron:tray
+      - if: runner.os == 'Windows'
+        run: npm run test:electron:tray
       - if: runner.os == 'Windows'
         run: npm run package:win
       - if: runner.os == 'Linux'

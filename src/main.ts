@@ -405,9 +405,18 @@ if (process.env.NODE_ENV === "test" && process.env.CACADUU_TEST_PROFILE)
   app.setPath("userData", process.env.CACADUU_TEST_PROFILE);
 if (process.argv.includes("--smoke-test"))
   app.setPath("userData", join(tmpdir(), "cacaduu-smoke-" + process.pid));
+// Used by the Windows uninstaller: removes the sign-in entry this app created, then exits.
+const unregisterOnly = process.argv.includes("--unregister-login-item");
+if (unregisterOnly)
+  void app.whenReady().then(() => {
+    if (["win32", "darwin"].includes(process.platform))
+      for (const args of [["--background"], []])
+        app.setLoginItemSettings({ openAtLogin: false, args });
+    app.exit(0);
+  });
 // One agent per Windows profile: a second launch (e.g. login item + manual start) focuses the first.
-const singleInstance = app.requestSingleInstanceLock();
-if (!singleInstance) app.quit();
+const singleInstance = !unregisterOnly && app.requestSingleInstanceLock();
+if (!singleInstance && !unregisterOnly) app.quit();
 app.on("second-instance", (_event, argv) => {
   if (!argv.includes("--background")) showWindow();
 });

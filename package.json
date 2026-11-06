@@ -22,7 +22,9 @@
     "test:packaged": "node scripts/test-electron.cjs --packaged",
     "test:scale": "npm run build && node --test tests/scale.test.cjs",
     "test:electron:scale": "npm run build && npm run native:electron && node scripts/test-electron.cjs --scale",
-    "licenses:report": "node scripts/license-report.cjs"
+    "licenses:report": "node scripts/license-report.cjs",
+    "installer:win": "npm run package:win && node scripts/build-installer.cjs",
+    "test:electron:tray": "npm run build && npm run native:electron && node scripts/test-electron-tray.cjs"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
