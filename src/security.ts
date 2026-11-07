@@ -1,6 +1,11 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  randomUUID,
+} from "node:crypto";
 export interface Cipher {
   isEncryptionAvailable(): boolean;
   encryptString(value: string): Buffer;
@@ -87,4 +92,51 @@ export function publicError(error: unknown): string {
   if (http)
     return `${http[1]} HTTP ${http[2]}: check credentials, permissions or service availability`;
   return "Operation failed. Check configuration, required mappings, credentials and source data. No inventory was assumed.";
+}
+/**
+ * AES-256-GCM cipher keyed by a 32-byte master key held in the OS credential
+ * store (Windows Credential Manager, macOS Keychain, Secret Service). Used by the
+ * Tauri shell, which has no Electron safeStorage. Without a key, encryption is
+ * reported unavailable and credentials are refused, as with Electron.
+ */
+export class KeyCipher implements Cipher {
+  private static readonly VERSION = 1;
+  private readonly key: Buffer | null;
+  constructor(key: Buffer | null) {
+    if (key && key.length !== 32)
+      throw new Error("Master key must be 32 bytes");
+    this.key = key;
+  }
+  isEncryptionAvailable(): boolean {
+    return this.key !== null;
+  }
+  private required(): Buffer {
+    if (!this.key) throw new UserError("OS secure storage unavailable");
+    return this.key;
+  }
+  encryptString(value: string): Buffer {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.required(), iv);
+    const body = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+    return Buffer.concat([
+      Buffer.from([KeyCipher.VERSION]),
+      iv,
+      cipher.getAuthTag(),
+      body,
+    ]);
+  }
+  decryptString(value: Buffer): string {
+    if (value.length < 29 || value[0] !== KeyCipher.VERSION)
+      throw new Error("Unsupported ciphertext");
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      this.required(),
+      value.subarray(1, 13),
+    );
+    decipher.setAuthTag(value.subarray(13, 29));
+    return Buffer.concat([
+      decipher.update(value.subarray(29)),
+      decipher.final(),
+    ]).toString("utf8");
+  }
 }

@@ -1,6 +1,6 @@
 # CACADUU Inventory Sync
 
-Standalone Electron + TypeScript inventory workspace. Reuses the desktop, export, cloud client and synchronization scaffold from `feature/universal-inventory-sync` (PR #2). CACADUU Cloud is optional; no website or server is required for local workflows.
+Standalone Electron or Tauri + TypeScript inventory workspace. Reuses the desktop, export, cloud client and synchronization scaffold from `feature/universal-inventory-sync` (PR #2). CACADUU Cloud is optional; no website or server is required for local workflows.
 
 ## Windows quick start
 
@@ -26,6 +26,30 @@ npm run package:win
 ```
 
 Keep the entire output folder together. Native `.node` files are unpacked from ASAR. This produces an unsigned portable application, not an installer; code signing and distribution are separate release work. Windows CI is included but must pass before Windows startup can be claimed verified. Linux validation does not establish Windows execution.
+
+## Tauri desktop build
+
+The same dashboard and inventory engine also ship as a [Tauri 2](https://tauri.app) app. The Rust shell (`src-tauri/`) owns the window, native file dialog, single-instance lock and OS credential store. The unchanged TypeScript engine (SQLite store, adapters, scheduler, cloud client) runs as a bundled Node.js sidecar (`src/sidecar.ts`) that talks to the shell over newline-delimited JSON on stdio. Both shells share `src/backend.ts`, so Electron and Tauri dispatch identical channels with identical validation and error redaction.
+
+Prerequisites: Node.js 22.15+, Rust stable, and the [Tauri system dependencies](https://tauri.app/start/prerequisites/) (WebView2 on Windows, which Windows 10/11 already include; `libwebkit2gtk-4.1-dev`, `librsvg2-dev`, `libayatana-appindicator3-dev` and `libdbus-1-dev` on Debian/Ubuntu).
+
+```sh
+npm ci
+npm run tauri:dev      # run with hot reload of the Rust shell
+npm run tauri:build    # release build + installers (MSI/NSIS on Windows; deb/rpm/AppImage on Linux)
+npm run smoke:tauri    # debug build, then launch with --smoke-test in a throwaway profile
+```
+
+`tauri:prepare` (run automatically by `tauri dev`/`tauri build`) compiles the TypeScript, stages `dist/` plus production `node_modules` into `build/tauri-backend/`, keeps only this platform's better-sqlite3 prebuild, checks that it loads, and copies the current Node.js runtime to `src-tauri/binaries/cacaduu-node-<target-triple>`. Build on each target OS; it does not cross-compile. Installed packages place it as `cacaduu-node` beside the app so it never replaces a system `node`. On Linux, a sandboxed container without FUSE needs `APPIMAGE_EXTRACT_AND_RUN=1` for the AppImage step.
+
+Security differences from Electron:
+
+- **Credentials:** instead of Electron safeStorage, a random 32-byte master key is created once in the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service) and passed to the sidecar only over its private stdin pipe. Credentials and the cloud token are sealed with AES-256-GCM. Without an OS credential store (for example headless Linux), secure storage is reported unavailable and credentials are refused, as with Electron. A malformed or unreadable key is never overwritten.
+- **Profile:** Tauri uses its own data directory (`com.cacaduu.inventory` under the OS app-data location). Electron profiles are not migrated, because safeStorage-encrypted secrets cannot be decrypted by another app; re-enter credentials in the Tauri app.
+- **Renderer:** only `backend_call`, `choose_file` and `smoke_result` are callable (deny-by-default app manifest plus a capability scoped to the main window); `backend_call` accepts only the fixed channel list. Navigation away from the bundled origin is refused, the CSP matches the Electron build, the global prototype is frozen and `ui/tauri-bridge.js` is inert outside Tauri. `NODE_OPTIONS`/`NODE_PATH` are stripped from the sidecar environment.
+- **Shutdown:** closing the window asks the sidecar to finish active syncs, exports and cloud calls (up to 60 seconds) before exiting. If the shell dies, the sidecar sees stdin close and shuts down cleanly on its own.
+
+`NODE_ENV=test CACADUU_TEST_PROFILE=<dir>` selects a test profile, as in Electron. `CACADUU_NODE=<path>` overrides the runtime used for the sidecar during development.
 
 ## Use the dashboard
 
@@ -82,7 +106,7 @@ POS Connections includes 14 requested regional preparation profiles with country
 
 ## Protocol and licence records
 
-See the [connector protocol and licence ledger](docs/CONNECTOR_PROTOCOLS_AND_LICENSES.md) for pinned ERPNext/Odoo source contracts, version boundaries, setup instructions and access requirements. `npm run licenses:report` regenerates the inventory of 91 locked dependency licence declarations. The application itself has no declared project licence; choose one before publishing a distributable. No proprietary vendor SDK is bundled or licence entitlement implied. Preserve packaged Electron/Chromium and module notices.
+See the [connector protocol and licence ledger](docs/CONNECTOR_PROTOCOLS_AND_LICENSES.md) for pinned ERPNext/Odoo source contracts, version boundaries, setup instructions and access requirements. `npm run licenses:report` regenerates the inventory of 103 locked dependency licence declarations. The application itself has no declared project licence; choose one before publishing a distributable. No proprietary vendor SDK is bundled or licence entitlement implied. Preserve packaged Electron/Chromium and module notices.
 
 ## Cloud compatibility
 

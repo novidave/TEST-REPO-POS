@@ -93,6 +93,78 @@
       "scope": "build/development"
     },
     {
+      "path": "node_modules/@tauri-apps/cli",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-darwin-arm64",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-darwin-x64",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-arm-gnueabihf",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-arm64-gnu",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-arm64-musl",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-riscv64-gnu",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-x64-gnu",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-linux-x64-musl",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-win32-arm64-msvc",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-win32-ia32-msvc",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
+      "path": "node_modules/@tauri-apps/cli-win32-x64-msvc",
+      "version": "2.12.4",
+      "license": "Apache-2.0 OR MIT",
+      "scope": "build/development"
+    },
+    {
       "path": "node_modules/@types/better-sqlite3",
       "version": "7.6.13",
       "license": "MIT",
