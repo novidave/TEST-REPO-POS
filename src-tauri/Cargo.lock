@@ -374,6 +374,7 @@ name = "cacaduu-inventory"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "dunce",
  "getrandom 0.3.4",
  "keyring",
  "serde_json",

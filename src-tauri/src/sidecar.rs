@@ -34,6 +34,11 @@ impl Sidecar {
         version: &str,
         key: Option<String>,
     ) -> Result<Arc<Self>, String> {
+        // Tauri resolves Windows paths in verbatim form (`\\?\D:\...`), which Node
+        // cannot load a main script from. Use the plain form where that is lossless.
+        let node = dunce::simplified(node);
+        let script = dunce::simplified(script);
+        let user_data = dunce::simplified(user_data);
         if !script.is_file() {
             return Err(format!("backend script missing at {}", script.display()));
         }
