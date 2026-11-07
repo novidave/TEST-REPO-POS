@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-smoke-result"
+description = "Enables the smoke_result command without any pre-configured scope."
+commands.allow = ["smoke_result"]
+
+[[permission]]
+identifier = "deny-smoke-result"
+description = "Denies the smoke_result command without any pre-configured scope."
+commands.deny = ["smoke_result"]

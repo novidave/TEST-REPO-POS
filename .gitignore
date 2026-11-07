@@ -10,3 +10,7 @@ test-results/
 *.log
 .env.*
 !*.example
+build/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/binaries/

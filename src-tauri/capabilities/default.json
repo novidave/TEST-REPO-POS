@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled dashboard may call only the fixed backend bridge.",
+  "windows": ["main"],
+  "permissions": ["allow-backend-call", "allow-choose-file", "allow-smoke-result"]
+}

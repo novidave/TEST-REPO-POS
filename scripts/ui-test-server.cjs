@@ -6,6 +6,7 @@ http
     const name = {
       "/": "index.html",
       "/ui.js": "ui.js",
+      "/tauri-bridge.js": "tauri-bridge.js",
       "/style.css": "style.css",
     }[req.url];
     if (!name) {

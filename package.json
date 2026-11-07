@@ -2,7 +2,7 @@
   "name": "cacaduu-pos-sync-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone Electron POS export agent with optional CACADUU Cloud Connection",
+  "description": "Standalone desktop POS export agent (Electron or Tauri shell) with optional CACADUU Cloud Connection",
   "main": "dist/src/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -22,12 +22,18 @@
     "test:packaged": "node scripts/test-electron.cjs --packaged",
     "test:scale": "npm run build && node --test tests/scale.test.cjs",
     "test:electron:scale": "npm run build && npm run native:electron && node scripts/test-electron.cjs --scale",
-    "licenses:report": "node scripts/license-report.cjs"
+    "licenses:report": "node scripts/license-report.cjs",
+    "tauri": "tauri",
+    "tauri:prepare": "npm run build && node scripts/tauri-prepare.cjs",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "smoke:tauri": "tauri build --debug --no-bundle && node scripts/tauri-smoke.cjs"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",
     "@electron/rebuild": "^4.2.1",
     "@playwright/test": "^1.64.1",
+    "@tauri-apps/cli": "^2.12.4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.0",
     "electron": "^45.1.0",

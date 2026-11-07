@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; connect-src ipc: http://ipc.localhost; base-uri 'none'; form-action 'none'"
     />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>CACADUU Inventory Sync</title>
@@ -603,6 +603,7 @@
         ><button id="wizard-save" hidden>Save connection</button>
       </footer>
     </dialog>
+    <script src="./tauri-bridge.js"></script>
     <script src="./ui.js"></script>
   </body>
 </html>
